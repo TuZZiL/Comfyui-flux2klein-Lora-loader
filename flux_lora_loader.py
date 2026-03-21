@@ -44,6 +44,8 @@ import comfy.lora
 import folder_paths
 import logging
 
+from .edit_presets import EDIT_PRESETS, PRESET_NAMES, interpolate_preset
+
 logger = logging.getLogger(__name__)
 
 N_DOUBLE = 8
@@ -83,6 +85,17 @@ class FluxLoraLoader:
                 "layer_strengths":    ("STRING", {"default": "{}"}),
                 # Wire from FluxLoraAutoStrength so you only pick the LoRA once
                 "lora_name_override": ("STRING", {"forceInput": True}),
+                "edit_mode": (PRESET_NAMES, {
+                    "default": "None",
+                    "tooltip": "Semantic edit preset for Klein 9B. Controls which layers are dampened to preserve identity, style, etc.",
+                }),
+                "balance": ("FLOAT", {
+                    "default": 0.5,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "tooltip": "0.0 = full preset effect (max protection), 1.0 = standard LoRA (no protection).",
+                }),
             },
         }
 
@@ -92,7 +105,8 @@ class FluxLoraLoader:
     TITLE = "FLUX LoRA Loader"
 
     def load_lora(self, model, lora_name, strength_model,
-                  auto_convert=True, layer_strengths="{}", lora_name_override=""):
+                  auto_convert=True, layer_strengths="{}", lora_name_override="",
+                  edit_mode="None", balance=0.5):
         if strength_model == 0:
             return (model,)
 
@@ -104,7 +118,7 @@ class FluxLoraLoader:
         lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
         logger.info(f"[FLUX LoRA] Loading: {lora_name}  ({len(lora_sd)} keys)")
 
-        # Parse per-layer strengths from graph widget
+        # Parse per-layer strengths from graph widget / AutoStrength
         layer_cfg = {}
         try:
             raw = json.loads(layer_strengths)
@@ -113,19 +127,25 @@ class FluxLoraLoader:
         except Exception:
             pass
 
+        # Resolve edit-mode preset
+        edit_preset_cfg = None
+        if edit_mode != "None":
+            preset_raw = EDIT_PRESETS.get(edit_mode)
+            if preset_raw is not None:
+                edit_preset_cfg = interpolate_preset(preset_raw, balance)
+                logger.info(f"[FLUX LoRA] Edit mode '{edit_mode}' applied (balance={balance:.2f})")
+
         if auto_convert and self._is_diffusers_format(lora_sd):
             logger.info("[FLUX LoRA] Detected diffusers format — converting")
             lora_sd = self._convert_to_native(lora_sd)
 
-        # Bake per-layer strength into lora_B before patching
+        # Step 1: Apply AutoStrength / widget layer_cfg (existing pipeline)
         if layer_cfg:
-            # Grab a sample lora_B tensor norm BEFORE scaling for verification
             sample_key = next((k for k in lora_sd if k.endswith(".lora_B.weight") or k.endswith(".lora_up.weight")), None)
             norm_before = float(lora_sd[sample_key].float().norm().item()) if sample_key else None
 
             lora_sd = self._apply_layer_strengths(lora_sd, layer_cfg, strength_model)
 
-            # Norm AFTER — if these differ, scaling was applied
             norm_after = float(lora_sd[sample_key].float().norm().item()) if sample_key else None
             if norm_before is not None:
                 ratio = norm_after / norm_before if norm_before > 1e-8 else 0
@@ -135,6 +155,10 @@ class FluxLoraLoader:
                     f"norm: {norm_before:.6f} → {norm_after:.6f} "
                     f"(ratio={ratio:.4f}, expected≠1.0 if scaling active)"
                 )
+
+        # Step 2: Apply edit-mode multipliers on top (independent of strength_model)
+        if edit_preset_cfg:
+            lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
 
         key_map = self._build_key_map(model)
         patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
@@ -418,6 +442,52 @@ class FluxLoraLoader:
 
         return scaled
 
+    # ── Edit-mode multipliers ───────────────────────────────────────────────
+
+    @staticmethod
+    def _apply_edit_multipliers(lora_sd, preset_cfg):
+        """
+        Scale lora_B tensors by edit-mode preset multipliers.
+
+        Unlike _apply_layer_strengths (which normalizes relative to global_strength),
+        this applies multipliers directly: tensor * multiplier.
+        Global strength is handled separately via effective_strength in add_patches.
+        """
+        db_cfg = {str(k): v for k, v in preset_cfg.get("db", {}).items()}
+        sb_cfg = {str(k): v for k, v in preset_cfg.get("sb", {}).items()}
+
+        scaled = {}
+        for key, tensor in lora_sd.items():
+            if not key.endswith(".lora_B.weight"):
+                scaled[key] = tensor
+                continue
+
+            parts = key.split(".")
+            multiplier = None
+
+            for i, p in enumerate(parts):
+                if p == "double_blocks" and i + 1 < len(parts):
+                    idx = parts[i + 1]
+                    if idx in db_cfg:
+                        cfg = db_cfg[idx]
+                        is_txt = any(x in parts for x in ("txt_attn", "txt_mlp"))
+                        side = "txt" if is_txt else "img"
+                        multiplier = (cfg.get(side, 1.0)
+                                      if isinstance(cfg, dict) else float(cfg))
+                    break
+                if p == "single_blocks" and i + 1 < len(parts):
+                    idx = parts[i + 1]
+                    if idx in sb_cfg:
+                        multiplier = float(sb_cfg[idx])
+                    break
+
+            if multiplier is not None and abs(multiplier - 1.0) > 1e-6:
+                scaled[key] = tensor * multiplier
+            else:
+                scaled[key] = tensor
+
+        return scaled
+
     # ── Key map ────────────────────────────────────────────────────────────────
 
     def _build_key_map(self, model):
@@ -456,7 +526,19 @@ class FluxLoraStack(FluxLoraLoader):
     @classmethod
     def INPUT_TYPES(cls):
         loras = ["None"] + folder_paths.get_filename_list("loras")
-        optional = {}
+        optional = {
+            "edit_mode": (PRESET_NAMES, {
+                "default": "None",
+                "tooltip": "Semantic edit preset applied to ALL LoRAs in the stack.",
+            }),
+            "balance": ("FLOAT", {
+                "default": 0.5,
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "tooltip": "0.0 = full preset effect (max protection), 1.0 = standard LoRA (no protection).",
+            }),
+        }
         for i in range(1, _MAX_SLOTS + 1):
             optional[f"lora_{i}"]     = (loras,)
             optional[f"strength_{i}"] = ("FLOAT", {
@@ -482,6 +564,17 @@ class FluxLoraStack(FluxLoraLoader):
         key_map = self._build_key_map(model)
         current = model
 
+        edit_mode = kwargs.get("edit_mode", "None")
+        balance = kwargs.get("balance", 0.5)
+
+        # Pre-compute edit preset once (same for all slots)
+        edit_preset_cfg = None
+        if edit_mode != "None":
+            preset_raw = EDIT_PRESETS.get(edit_mode)
+            if preset_raw is not None:
+                edit_preset_cfg = interpolate_preset(preset_raw, balance)
+                logger.info(f"[FLUX LoRA Stack] Edit mode '{edit_mode}' (balance={balance:.2f})")
+
         for i in range(1, _MAX_SLOTS + 1):
             name     = kwargs.get(f"lora_{i}",     "None")
             strength = kwargs.get(f"strength_{i}", 1.0)
@@ -497,6 +590,10 @@ class FluxLoraStack(FluxLoraLoader):
 
             if convert and self._is_diffusers_format(lora_sd):
                 lora_sd = self._convert_to_native(lora_sd)
+
+            # Apply edit-mode multipliers (independent of per-slot strength)
+            if edit_preset_cfg:
+                lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
 
             patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
             next_model = current.clone()

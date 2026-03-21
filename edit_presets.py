@@ -1,0 +1,177 @@
+"""
+Edit-mode presets for FLUX.2 Klein 9B LoRA loading.
+
+Each preset defines per-layer strength multipliers that control how strongly
+the LoRA affects different parts of the model.  Based on community research
+(comfyUI-Realtime-Lora / flux_klein_debiaser) showing that:
+
+  - Double blocks (0-7): img and txt streams are ISOLATED.
+    img_attn/img_mlp handle reference+noisy together.
+    txt_attn/txt_mlp handle text independently.
+    → Cannot cause text-driven image corruption on their own.
+
+  - Single blocks (0-23): JOINT cross-modal processing (img+txt concatenated).
+    → This is where the text prompt overwrites the reference image.
+    → Late single blocks (12-23) are the most aggressive.
+
+Preset format matches the existing layer_strengths JSON:
+  {"db": {"0": {"img": float, "txt": float}, ...}, "sb": {"0": float, ...}}
+
+Values are multipliers relative to global_strength:
+  1.0 = full LoRA effect, 0.3 = 30% effect, 1.15 = 115% (boosted)
+"""
+
+N_DOUBLE = 8
+N_SINGLE = 24
+
+EDIT_PRESETS = {
+    "None": None,
+
+    "Preserve Face": {
+        # Preserves face/identity during editing.
+        # Double blocks: keep img stream, slightly reduce txt influence.
+        # Single blocks: gradient from 1.0 (early) down to 0.30 (late).
+        "db": {
+            "0": {"img": 1.0, "txt": 0.90}, "1": {"img": 1.0, "txt": 0.90},
+            "2": {"img": 1.0, "txt": 0.90}, "3": {"img": 1.0, "txt": 0.90},
+            "4": {"img": 1.0, "txt": 0.85}, "5": {"img": 1.0, "txt": 0.85},
+            "6": {"img": 1.0, "txt": 0.85}, "7": {"img": 1.0, "txt": 0.85},
+        },
+        "sb": {
+            "0": 1.0,  "1": 1.0,  "2": 1.0,  "3": 1.0,
+            "4": 1.0,  "5": 1.0,  "6": 0.95, "7": 0.95,
+            "8": 0.90, "9": 0.85, "10": 0.80, "11": 0.75,
+            "12": 0.65, "13": 0.60, "14": 0.55, "15": 0.50,
+            "16": 0.45, "17": 0.40, "18": 0.38, "19": 0.35,
+            "20": 0.33, "21": 0.32, "22": 0.30, "23": 0.30,
+        },
+    },
+
+    "Style Only": {
+        # Applies only stylistic changes, minimal structural impact.
+        # Double blocks: reduce img stream (less structural change), keep txt.
+        # Single blocks: early kept, late strongly reduced.
+        "db": {
+            "0": {"img": 0.40, "txt": 1.0}, "1": {"img": 0.40, "txt": 1.0},
+            "2": {"img": 0.45, "txt": 1.0}, "3": {"img": 0.45, "txt": 1.0},
+            "4": {"img": 0.50, "txt": 1.0}, "5": {"img": 0.50, "txt": 1.0},
+            "6": {"img": 0.55, "txt": 1.0}, "7": {"img": 0.55, "txt": 1.0},
+        },
+        "sb": {
+            "0": 1.0,  "1": 1.0,  "2": 1.0,  "3": 0.95,
+            "4": 0.90, "5": 0.85, "6": 0.80, "7": 0.75,
+            "8": 0.70, "9": 0.65, "10": 0.60, "11": 0.55,
+            "12": 0.50, "13": 0.45, "14": 0.40, "15": 0.38,
+            "16": 0.35, "17": 0.33, "18": 0.30, "19": 0.30,
+            "20": 0.30, "21": 0.30, "22": 0.30, "23": 0.30,
+        },
+    },
+
+    "Edit Subject": {
+        # Edit clothing/objects while preserving identity.
+        # Compromise between Preserve Face and full LoRA.
+        # Double blocks: slightly boost txt for prompt compliance.
+        # Single blocks: moderate protection on late blocks.
+        "db": {
+            "0": {"img": 1.0, "txt": 1.05}, "1": {"img": 1.0, "txt": 1.05},
+            "2": {"img": 1.0, "txt": 1.05}, "3": {"img": 1.0, "txt": 1.05},
+            "4": {"img": 0.95, "txt": 1.0}, "5": {"img": 0.95, "txt": 1.0},
+            "6": {"img": 0.95, "txt": 1.0}, "7": {"img": 0.95, "txt": 1.0},
+        },
+        "sb": {
+            "0": 1.0,  "1": 1.0,  "2": 1.0,  "3": 1.0,
+            "4": 1.0,  "5": 1.0,  "6": 1.0,  "7": 0.95,
+            "8": 0.90, "9": 0.85, "10": 0.80, "11": 0.75,
+            "12": 0.65, "13": 0.60, "14": 0.55, "15": 0.50,
+            "16": 0.50, "17": 0.50, "18": 0.50, "19": 0.50,
+            "20": 0.50, "21": 0.50, "22": 0.50, "23": 0.50,
+        },
+    },
+
+    "Boost Prompt": {
+        # Strengthens prompt compliance (opposite of Preserve Face).
+        # Double blocks: boost txt stream, slightly reduce img.
+        # Single blocks: boost mid blocks where cross-modal mixing peaks.
+        "db": {
+            "0": {"img": 0.90, "txt": 1.15}, "1": {"img": 0.90, "txt": 1.15},
+            "2": {"img": 0.90, "txt": 1.15}, "3": {"img": 0.90, "txt": 1.15},
+            "4": {"img": 0.85, "txt": 1.10}, "5": {"img": 0.85, "txt": 1.10},
+            "6": {"img": 0.85, "txt": 1.10}, "7": {"img": 0.85, "txt": 1.10},
+        },
+        "sb": {
+            "0": 1.0,  "1": 1.0,  "2": 1.0,  "3": 1.0,
+            "4": 1.05, "5": 1.05, "6": 1.05, "7": 1.05,
+            "8": 1.10, "9": 1.10, "10": 1.10, "11": 1.10,
+            "12": 1.10, "13": 1.10, "14": 1.10, "15": 1.10,
+            "16": 1.05, "17": 1.05, "18": 1.05, "19": 1.05,
+            "20": 1.0,  "21": 1.0,  "22": 1.0,  "23": 1.0,
+        },
+    },
+}
+
+PRESET_NAMES = list(EDIT_PRESETS.keys())
+
+
+def interpolate_preset(preset_cfg, balance):
+    """
+    Interpolate between a preset and neutral (all 1.0).
+
+    balance = 0.0  →  full preset (maximum protection/effect)
+    balance = 1.0  →  all weights = 1.0 (standard LoRA, no edit-mode effect)
+
+    Formula:  final = preset_value + (1.0 - preset_value) * balance
+    """
+    if preset_cfg is None:
+        return {}
+
+    result = {"db": {}, "sb": {}}
+
+    for idx, cfg in preset_cfg["db"].items():
+        result["db"][idx] = {
+            "img": cfg["img"] + (1.0 - cfg["img"]) * balance,
+            "txt": cfg["txt"] + (1.0 - cfg["txt"]) * balance,
+        }
+
+    for idx, val in preset_cfg["sb"].items():
+        result["sb"][idx] = val + (1.0 - val) * balance
+
+    return result
+
+
+def merge_preset_over(base_cfg, preset_cfg):
+    """
+    Multiply preset weights on top of an existing layer_cfg.
+    This allows combining AutoStrength (ΔW-based) with semantic edit presets.
+
+    For each layer: final = base_value * preset_value
+    """
+    if not preset_cfg:
+        return base_cfg
+    if not base_cfg:
+        return preset_cfg
+
+    merged = {"db": {}, "sb": {}}
+
+    # Merge double blocks
+    all_db_keys = set(base_cfg.get("db", {}).keys()) | set(preset_cfg.get("db", {}).keys())
+    for idx in all_db_keys:
+        base_db = base_cfg.get("db", {}).get(idx, {"img": 1.0, "txt": 1.0})
+        preset_db = preset_cfg.get("db", {}).get(idx, {"img": 1.0, "txt": 1.0})
+        if isinstance(base_db, dict):
+            base_img = base_db.get("img", 1.0)
+            base_txt = base_db.get("txt", 1.0)
+        else:
+            base_img = base_txt = float(base_db)
+        merged["db"][idx] = {
+            "img": base_img * preset_db.get("img", 1.0),
+            "txt": base_txt * preset_db.get("txt", 1.0),
+        }
+
+    # Merge single blocks
+    all_sb_keys = set(base_cfg.get("sb", {}).keys()) | set(preset_cfg.get("sb", {}).keys())
+    for idx in all_sb_keys:
+        base_val = float(base_cfg.get("sb", {}).get(idx, 1.0))
+        preset_val = float(preset_cfg.get("sb", {}).get(idx, 1.0))
+        merged["sb"][idx] = base_val * preset_val
+
+    return merged
