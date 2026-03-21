@@ -842,6 +842,35 @@ class FluxLoraScheduled(FluxLoraLoader):
         return (model_out, hook_group)
 
 
+# ── Hook utility ──────────────────────────────────────────────────────────────
+
+class FluxSetCondHooks:
+    """
+    Attaches HOOKS (from FluxLoraScheduled) to conditioning.
+    Required for per-step scheduling to work — hooks must be referenced
+    in the conditioning so the sampler knows to activate them.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "conditioning": ("CONDITIONING",),
+                "hooks": ("HOOKS",),
+            },
+        }
+
+    RETURN_TYPES = ("CONDITIONING",)
+    FUNCTION = "set_hooks"
+    CATEGORY = "loaders/FLUX"
+    TITLE = "FLUX Set Cond Hooks"
+
+    def set_hooks(self, conditioning, hooks):
+        import comfy.hooks
+        cond_out = comfy.hooks.set_hooks_for_conditioning(conditioning, hooks)
+        return (cond_out,)
+
+
 # ── Exports ───────────────────────────────────────────────────────────────────
 
 NODE_CLASS_MAPPINGS = {
@@ -849,6 +878,7 @@ NODE_CLASS_MAPPINGS = {
     "FluxLoraStack":     FluxLoraStack,
     "FluxLoraQuad":      FluxLoraQuad,
     "FluxLoraScheduled": FluxLoraScheduled,
+    "FluxSetCondHooks":  FluxSetCondHooks,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -856,4 +886,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FluxLoraStack":     "FLUX LoRA Stack",
     "FluxLoraQuad":      "FLUX LoRA Quad",
     "FluxLoraScheduled": "FLUX LoRA Scheduled",
+    "FluxSetCondHooks":  "FLUX Set Cond Hooks",
 }
