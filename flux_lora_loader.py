@@ -44,13 +44,39 @@ import comfy.lora
 import folder_paths
 import logging
 
-from .edit_presets import EDIT_PRESETS, PRESET_NAMES, interpolate_preset
+from .edit_presets import EDIT_PRESETS, PRESET_NAMES, interpolate_preset, auto_select_preset
 
 logger = logging.getLogger(__name__)
 
 N_DOUBLE = 8
 N_SINGLE = 24
 _MAX_SLOTS = 10
+
+
+def _resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA"):
+    """Resolve edit_mode (including Auto) into a preset config or None."""
+    if edit_mode == "None":
+        return None
+    if edit_mode == "Auto":
+        from .lora_meta import analyse_for_node
+        analysis = analyse_for_node(lora_path)
+        auto_preset, auto_balance = auto_select_preset(analysis)
+        if auto_preset == "None":
+            logger.info(f"[{node_label}] Auto → None (LoRA is safe, no preset needed)")
+            return None
+        preset_raw = EDIT_PRESETS.get(auto_preset)
+        if preset_raw is not None:
+            cfg = interpolate_preset(preset_raw, auto_balance)
+            logger.info(f"[{node_label}] Auto → {auto_preset} (balance={auto_balance:.2f})")
+            return cfg
+        return None
+    # Manual preset
+    preset_raw = EDIT_PRESETS.get(edit_mode)
+    if preset_raw is not None:
+        cfg = interpolate_preset(preset_raw, balance)
+        logger.info(f"[{node_label}] Edit mode '{edit_mode}' applied (balance={balance:.2f})")
+        return cfg
+    return None
 
 
 # ── Single loader ──────────────────────────────────────────────────────────────
@@ -128,12 +154,7 @@ class FluxLoraLoader:
             pass
 
         # Resolve edit-mode preset
-        edit_preset_cfg = None
-        if edit_mode != "None":
-            preset_raw = EDIT_PRESETS.get(edit_mode)
-            if preset_raw is not None:
-                edit_preset_cfg = interpolate_preset(preset_raw, balance)
-                logger.info(f"[FLUX LoRA] Edit mode '{edit_mode}' applied (balance={balance:.2f})")
+        edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, "FLUX LoRA")
 
         if auto_convert and self._is_diffusers_format(lora_sd):
             logger.info("[FLUX LoRA] Detected diffusers format — converting")
@@ -588,12 +609,12 @@ class FluxLoraStack(FluxLoraLoader):
         edit_mode = kwargs.get("edit_mode", "None")
         balance = kwargs.get("balance", 0.5)
 
-        # Pre-compute edit preset once (same for all slots)
-        edit_preset_cfg = None
-        if edit_mode != "None":
+        # For non-Auto modes, pre-compute preset once
+        stack_preset_cfg = None
+        if edit_mode not in ("None", "Auto"):
             preset_raw = EDIT_PRESETS.get(edit_mode)
             if preset_raw is not None:
-                edit_preset_cfg = interpolate_preset(preset_raw, balance)
+                stack_preset_cfg = interpolate_preset(preset_raw, balance)
                 logger.info(f"[FLUX LoRA Stack] Edit mode '{edit_mode}' (balance={balance:.2f})")
 
         for i in range(1, _MAX_SLOTS + 1):
@@ -612,9 +633,14 @@ class FluxLoraStack(FluxLoraLoader):
             if convert and self._is_diffusers_format(lora_sd):
                 lora_sd = self._convert_to_native(lora_sd)
 
-            # Apply edit-mode multipliers (independent of per-slot strength)
-            if edit_preset_cfg:
-                lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
+            # Apply edit-mode multipliers
+            if edit_mode == "Auto":
+                # Auto analyzes each LoRA individually
+                slot_preset = _resolve_edit_mode("Auto", balance, lora_path, f"FLUX LoRA Stack] Slot {i}")
+                if slot_preset:
+                    lora_sd = self._apply_edit_multipliers(lora_sd, slot_preset)
+            elif stack_preset_cfg:
+                lora_sd = self._apply_edit_multipliers(lora_sd, stack_preset_cfg)
 
             patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
             next_model = current.clone()
@@ -689,13 +715,11 @@ class FluxLoraQuad(FluxLoraLoader):
             if convert and self._is_diffusers_format(lora_sd):
                 lora_sd = self._convert_to_native(lora_sd)
 
-            # Per-slot edit-mode
-            if edit_mode != "None":
-                preset_raw = EDIT_PRESETS.get(edit_mode)
-                if preset_raw is not None:
-                    preset_cfg = interpolate_preset(preset_raw, balance)
-                    lora_sd = self._apply_edit_multipliers(lora_sd, preset_cfg)
-                    logger.info(f"[FLUX LoRA Quad] Slot {i}: edit_mode='{edit_mode}' balance={balance:.2f}")
+            # Per-slot edit-mode (supports Auto)
+            edit_preset_cfg = _resolve_edit_mode(
+                edit_mode, balance, lora_path, f"FLUX LoRA Quad] Slot {i}")
+            if edit_preset_cfg:
+                lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
 
             patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
             next_model = current.clone()

@@ -117,10 +117,12 @@ def parse_lora_key(key: str):
     k = key
     for suffix in ["lora_down.weight", "lora_up.weight",
                    "lora_A.weight", "lora_B.weight",
+                   "lora_A.default.weight", "lora_B.default.weight",
                    "alpha", "dora_scale", "bias"]:
         if k.endswith("." + suffix) or k.endswith("_" + suffix):
             base = k[: -(len(suffix) + 1)]
-            role = suffix.replace(".weight", "").replace("lora_A", "lora_down").replace("lora_B", "lora_up")
+            role = (suffix.replace(".default.weight", "").replace(".weight", "")
+                         .replace("lora_A", "lora_down").replace("lora_B", "lora_up"))
             return base, role
     return k, "other"
 
@@ -575,13 +577,23 @@ def analyse_for_node(path):
         all_layer_stats.append((base, dw_scaled))
 
         # Classify into db_img / db_txt / sb
-        clean = base.replace("diffusion_model.", "")
+        clean = base
+        for pfx in ("diffusion_model.", "transformer.", "unet."):
+            if clean.startswith(pfx):
+                clean = clean[len(pfx):]
+                break
+        # Remap diffusers/Musubi prefixes to native
+        if clean.startswith("transformer_blocks."):
+            clean = "double_blocks." + clean[len("transformer_blocks."):]
+        elif clean.startswith("single_transformer_blocks."):
+            clean = "single_blocks." + clean[len("single_transformer_blocks."):]
         parts = clean.split(".")
         try:
             if parts[0] == "double_blocks":
                 idx  = int(parts[1])
                 rest = ".".join(parts[2:])
-                (db_txt if rest.startswith("txt_") else db_img)[idx].append(dw_scaled)
+                is_txt = any(x in rest for x in ("txt_", "add_q", "add_k", "add_v", "add_out", "ff_context"))
+                (db_txt if is_txt else db_img)[idx].append(dw_scaled)
             elif parts[0] == "single_blocks":
                 sb[int(parts[1])].append(dw_scaled)
         except (IndexError, ValueError):

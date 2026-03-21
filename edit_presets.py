@@ -132,7 +132,7 @@ EDIT_PRESETS = {
     },
 }
 
-PRESET_NAMES = list(EDIT_PRESETS.keys())
+PRESET_NAMES = list(EDIT_PRESETS.keys()) + ["Auto"]
 
 
 def interpolate_preset(preset_cfg, balance):
@@ -198,3 +198,74 @@ def merge_preset_over(base_cfg, preset_cfg):
         merged["sb"][idx] = base_val * preset_val
 
     return merged
+
+
+def auto_select_preset(analysis):
+    """
+    Analyze ΔW norms from lora_meta.analyse_for_node() and pick the best
+    preset + balance automatically.
+
+    Decision logic based on where the training signal concentrates:
+      - late_ratio > 1.3  →  LoRA aggressively affects identity → Preserve Body
+      - late_ratio > 1.1  →  moderate identity impact → Preserve Face
+      - db_ratio > 0.8    →  uniform/structural LoRA → None (safe as-is)
+      - otherwise         →  Preserve Face (safe default)
+
+    Balance is computed from max/mean ratio:
+      - Higher concentration = lower balance (more protection needed)
+
+    Returns: (preset_name: str, balance: float)
+    """
+    db_norms = []
+    sb_early, sb_mid, sb_late = [], [], []
+
+    for i in range(N_DOUBLE):
+        db = analysis.get("db", {}).get(i, {})
+        if isinstance(db, dict):
+            if db.get("img"): db_norms.append(db["img"])
+            if db.get("txt"): db_norms.append(db["txt"])
+
+    for i in range(N_SINGLE):
+        v = analysis.get("sb", {}).get(i)
+        if v is not None:
+            if i < 8:
+                sb_early.append(v)
+            elif i < 16:
+                sb_mid.append(v)
+            else:
+                sb_late.append(v)
+
+    all_norms = db_norms + sb_early + sb_mid + sb_late
+    if not all_norms:
+        return ("Preserve Face", 0.40)
+
+    mean_all = sum(all_norms) / len(all_norms)
+    if mean_all < 1e-8:
+        return ("Preserve Face", 0.40)
+
+    max_all = max(all_norms)
+    late_mean = sum(sb_late) / len(sb_late) if sb_late else 0
+    db_mean = sum(db_norms) / len(db_norms) if db_norms else 0
+
+    late_ratio = late_mean / mean_all
+    db_ratio = db_mean / mean_all
+    max_ratio = max_all / mean_all
+
+    # Pick preset
+    if late_ratio > 1.3:
+        preset = "Preserve Body"
+    elif late_ratio > 1.1:
+        preset = "Preserve Face"
+    elif db_ratio > 0.8 and late_ratio < 1.0:
+        preset = "None"
+    else:
+        preset = "Preserve Face"
+
+    # Pick balance: higher concentration → lower balance (more protection)
+    # max_ratio 1.0–1.2 → balance ~0.55 (mild)
+    # max_ratio 1.5–2.0 → balance ~0.25 (strong protection)
+    balance = max(0.20, min(0.60, 0.70 - 0.25 * max_ratio))
+    balance = round(balance / 0.05) * 0.05  # snap to 0.05 grid
+
+    return (preset, balance)
+
