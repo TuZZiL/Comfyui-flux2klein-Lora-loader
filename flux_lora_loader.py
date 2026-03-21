@@ -45,6 +45,7 @@ import folder_paths
 import logging
 
 from .edit_presets import EDIT_PRESETS, PRESET_NAMES, interpolate_preset, auto_select_preset
+from .schedules import SCHEDULE_NAMES, build_keyframes
 
 logger = logging.getLogger(__name__)
 
@@ -729,16 +730,130 @@ class FluxLoraQuad(FluxLoraLoader):
         return (current,)
 
 
+# ── Scheduled Loader ──────────────────────────────────────────────────────────
+
+class FluxLoraScheduled(FluxLoraLoader):
+    """
+    Loads a FLUX LoRA with per-step strength scheduling via ComfyUI's Hook system.
+
+    Instead of constant LoRA strength across all sampling steps, this node
+    applies a strength curve (e.g., Fade Out: strong at start, weak at end).
+    Combined with edit-mode presets, this gives two dimensions of control:
+      - edit_mode: WHICH layers are affected (spatial)
+      - schedule:  WHEN the LoRA is active (temporal)
+
+    Returns MODEL + HOOKS. The HOOKS output must be connected to conditioning
+    via a "Cond Pair Set Props" or "Set CLIP Hooks" node.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "lora_name": (folder_paths.get_filename_list("loras"),),
+                "strength": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 2.0,
+                    "step": 0.01,
+                    "tooltip": "Base LoRA strength. The schedule multiplies this value.",
+                }),
+                "schedule": (SCHEDULE_NAMES, {
+                    "default": "Fade Out",
+                    "tooltip": "Strength curve over sampling steps. Fade Out = full effect at start, fades to zero.",
+                }),
+            },
+            "optional": {
+                "edit_mode": (PRESET_NAMES, {
+                    "default": "Auto",
+                    "tooltip": "Semantic edit preset (per-layer control). Auto analyzes the LoRA automatically.",
+                }),
+                "balance": ("FLOAT", {
+                    "default": 0.5,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "tooltip": "0.0 = full preset effect, 1.0 = standard LoRA.",
+                }),
+                "auto_convert": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "Auto-convert diffusers→native",
+                    "label_off": "Direct load (native only)",
+                }),
+                "keyframes": ("INT", {
+                    "default": 5,
+                    "min": 2,
+                    "max": 10,
+                    "tooltip": "Number of keyframes for the schedule. More = smoother but may cause minor hiccups.",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("MODEL", "HOOKS")
+    RETURN_NAMES = ("model", "hooks")
+    FUNCTION = "load_lora"
+    CATEGORY = "loaders/FLUX"
+    TITLE = "FLUX LoRA Scheduled"
+
+    def load_lora(self, model, lora_name, strength, schedule="Fade Out",
+                  edit_mode="Auto", balance=0.5, auto_convert=True, keyframes=5):
+        import comfy.hooks
+
+        if strength == 0:
+            empty_hooks = comfy.hooks.HookGroup()
+            return (model, empty_hooks)
+
+        lora_path = folder_paths.get_full_path("loras", lora_name)
+        lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
+        logger.info(f"[FLUX LoRA Scheduled] Loading: {lora_name}  ({len(lora_sd)} keys)")
+
+        if auto_convert and self._is_diffusers_format(lora_sd):
+            logger.info("[FLUX LoRA Scheduled] Detected diffusers format — converting")
+            lora_sd = self._convert_to_native(lora_sd)
+
+        # Apply edit-mode multipliers (per-layer control)
+        edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, "FLUX LoRA Scheduled")
+        if edit_preset_cfg:
+            lora_sd = self._apply_edit_multipliers(lora_sd, edit_preset_cfg)
+
+        # Build patches via comfy.lora
+        key_map = self._build_key_map(model)
+        patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
+        logger.info(f"[FLUX LoRA Scheduled] {len(patch_dict)} patches, schedule='{schedule}', keyframes={keyframes}")
+
+        # Create hook with scheduling
+        hook_group = comfy.hooks.HookGroup()
+        hook = comfy.hooks.WeightHook(strength_model=strength, strength_clip=0.0)
+        hook_group.add(hook)
+
+        # Build keyframe schedule
+        kf_group = build_keyframes(schedule, num_keyframes=keyframes)
+        hook.hook_keyframe = kf_group
+
+        # Log the schedule
+        for kf in kf_group.keyframes:
+            logger.info(f"[FLUX LoRA Scheduled]   {kf.start_percent:.0%} → strength×{kf.strength:.2f}")
+
+        # Register as hook patches (not regular patches)
+        model_out = model.clone()
+        model_out.add_hook_patches(hook=hook, patches=patch_dict, strength_patch=1.0)
+
+        return (model_out, hook_group)
+
+
 # ── Exports ───────────────────────────────────────────────────────────────────
 
 NODE_CLASS_MAPPINGS = {
-    "FluxLoraLoader": FluxLoraLoader,
-    "FluxLoraStack":  FluxLoraStack,
-    "FluxLoraQuad":   FluxLoraQuad,
+    "FluxLoraLoader":    FluxLoraLoader,
+    "FluxLoraStack":     FluxLoraStack,
+    "FluxLoraQuad":      FluxLoraQuad,
+    "FluxLoraScheduled": FluxLoraScheduled,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FluxLoraLoader": "FLUX LoRA Loader",
-    "FluxLoraStack":  "FLUX LoRA Stack",
-    "FluxLoraQuad":   "FLUX LoRA Quad",
+    "FluxLoraLoader":    "FLUX LoRA Loader",
+    "FluxLoraStack":     "FLUX LoRA Stack",
+    "FluxLoraQuad":      "FLUX LoRA Quad",
+    "FluxLoraScheduled": "FLUX LoRA Scheduled",
 }
