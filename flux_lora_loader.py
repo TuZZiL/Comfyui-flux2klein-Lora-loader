@@ -188,6 +188,9 @@ class FluxLoraLoader:
             ".ff_context.",         # FLUX txt FFN
             ".to_add_out.",         # FLUX txt out proj
             ".proj_mlp.",           # FLUX single block mlp gate
+            ".to_qkv_mlp_proj.",    # Musubi Tuner fused single block
+            ".ff.linear_in.",       # Musubi Tuner FFN naming
+            ".ff.linear_out.",      # Musubi Tuner FFN naming
         )
         return any(m in k for k in lora_sd for m in markers)
 
@@ -233,10 +236,20 @@ class FluxLoraLoader:
         for i in range(N_SINGLE):
             sb = f"single_blocks.{i}"
 
-            # linear1 = fused [q, k, v, mlp_gate_up] — 36864 = 12288 + 24576
+            # Musubi Tuner: already-fused to_qkv_mlp_proj → linear1 (direct remap)
+            self._remap(norm, out, done,
+                        f"{sb}.attn.to_qkv_mlp_proj",
+                        f"diffusion_model.{sb}.linear1")
+
+            # Musubi Tuner: attn.to_out → linear2 (direct remap)
+            self._remap(norm, out, done,
+                        f"{sb}.attn.to_out",
+                        f"diffusion_model.{sb}.linear2")
+
+            # Standard diffusers: separate q/k/v/proj_mlp → linear1 (block-diag fused)
             self._fuse_linear1(norm, out, done, sb)
 
-            # linear2 = proj_out
+            # Standard diffusers: proj_out → linear2
             self._remap(norm, out, done,
                         f"{sb}.proj_out",
                         f"diffusion_model.{sb}.linear2")
@@ -269,6 +282,14 @@ class FluxLoraLoader:
             k = re.sub(r'^single_transformer_blocks\.', 'single_blocks.', k)
             # Normalize lora_down / lora_up → lora_A / lora_B
             k = k.replace(".lora_down.", ".lora_A.").replace(".lora_up.", ".lora_B.")
+            # Strip .default. from Musubi Tuner / PEFT format keys
+            # e.g. .lora_A.default.weight → .lora_A.weight
+            k = k.replace(".lora_A.default.", ".lora_A.").replace(".lora_B.default.", ".lora_B.")
+            # Musubi Tuner FFN naming → diffusers naming (for uniform processing)
+            k = k.replace(".ff.linear_in.", ".ff.net.0.proj.")
+            k = k.replace(".ff.linear_out.", ".ff.net.2.")
+            k = k.replace(".ff_context.linear_in.", ".ff_context.net.0.proj.")
+            k = k.replace(".ff_context.linear_out.", ".ff_context.net.2.")
             out[k] = val
         return out
 
