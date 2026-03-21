@@ -31,6 +31,7 @@ EDIT_PRESETS = {
         # Preserves face/identity during editing.
         # Double blocks: keep img stream, slightly reduce txt influence.
         # Single blocks: gradient from 1.0 (early) down to 0.30 (late).
+        # Body proportions may still change — use Preserve Body for full protection.
         "db": {
             "0": {"img": 1.0, "txt": 0.90}, "1": {"img": 1.0, "txt": 0.90},
             "2": {"img": 1.0, "txt": 0.90}, "3": {"img": 1.0, "txt": 0.90},
@@ -44,6 +45,28 @@ EDIT_PRESETS = {
             "12": 0.65, "13": 0.60, "14": 0.55, "15": 0.50,
             "16": 0.45, "17": 0.40, "18": 0.38, "19": 0.35,
             "20": 0.33, "21": 0.32, "22": 0.30, "23": 0.30,
+        },
+    },
+
+    "Preserve Body": {
+        # Aggressive identity+body preservation during editing.
+        # Protects face, body proportions (breast size, waist, figure).
+        # Double blocks: keep img stream strong, reduce txt more.
+        # Single blocks: dampened from sb4 onward (wider protection than Preserve Face).
+        # Trade-off: LoRA editing effect will be weaker — use higher balance if needed.
+        "db": {
+            "0": {"img": 1.0, "txt": 0.85}, "1": {"img": 1.0, "txt": 0.85},
+            "2": {"img": 1.0, "txt": 0.85}, "3": {"img": 1.0, "txt": 0.85},
+            "4": {"img": 1.0, "txt": 0.80}, "5": {"img": 1.0, "txt": 0.80},
+            "6": {"img": 1.0, "txt": 0.80}, "7": {"img": 1.0, "txt": 0.80},
+        },
+        "sb": {
+            "0": 1.0,  "1": 1.0,  "2": 1.0,  "3": 0.95,
+            "4": 0.75, "5": 0.72, "6": 0.70, "7": 0.68,
+            "8": 0.65, "9": 0.62, "10": 0.60, "11": 0.55,
+            "12": 0.50, "13": 0.47, "14": 0.44, "15": 0.40,
+            "16": 0.38, "17": 0.35, "18": 0.33, "19": 0.32,
+            "20": 0.30, "21": 0.30, "22": 0.30, "23": 0.30,
         },
     },
 

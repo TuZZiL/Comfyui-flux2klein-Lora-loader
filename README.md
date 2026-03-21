@@ -62,6 +62,7 @@ The `edit_mode` dropdown provides ready-made per-layer weight profiles:
 |---|---|---|
 | **None** | Standard LoRA (all layers equal) | Default behavior |
 | **Preserve Face** | Dampens late single blocks, keeps img stream intact | Editing while keeping face/identity |
+| **Preserve Body** | Aggressively dampens mid+late single blocks | Editing while keeping face + body proportions (figure, breast size, waist) |
 | **Style Only** | Reduces img stream in double blocks, dampens late singles | Applying style changes without structural edits |
 | **Edit Subject** | Moderate protection on late blocks, slight txt boost | Changing clothing/objects while preserving identity |
 | **Boost Prompt** | Strengthens txt stream and mid single blocks | When the prompt isn't being followed strongly enough |
