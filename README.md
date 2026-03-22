@@ -1,9 +1,23 @@
 # ComfyUI FLUX.2 Klein LoRA Loader
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Architecture-aware LoRA loading for **FLUX.2 Klein** (9B) in ComfyUI, with automatic per-layer strength calibration, **semantic edit-mode presets** for identity-preserving image editing, and **Auto mode** that picks the best preset for each LoRA.
+Architecture-aware LoRA loading for **FLUX.2 Klein** (9B) in ComfyUI.
 
 [Українська версія](README_UA.md)
+
+## Why use this instead of the standard LoRA loader?
+
+Most LoRAs you download were trained with HuggingFace tools and saved in **diffusers format**. The standard ComfyUI LoRA loader **silently drops** most of these weights on Klein 9B — your LoRA loads, but it barely works or looks wrong.
+
+This pack **automatically converts** any LoRA format to work correctly with Klein 9B. Just drop in your LoRA and it works at full power.
+
+But there's more. When you use LoRAs for **image editing** (changing clothes, adding accessories, style transfer on a reference photo), the LoRA often **destroys the face** or changes body proportions. This pack solves that with **edit-mode presets** — one dropdown that tells the loader which parts of the image to protect:
+
+- **Preserve Face** — edit freely while keeping the person's face intact
+- **Preserve Body** — protect both face and body proportions (figure, pose)
+- **Auto** — the loader analyzes your LoRA and picks the best protection automatically
+
+The result: your edits apply where you want them, and everything else stays untouched.
 
 ## Key Features
 
