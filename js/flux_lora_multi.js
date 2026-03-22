@@ -198,7 +198,7 @@ app.registerExtension({
                     const data = node._slots[slotIdx];
                     const loraValues = ["None", ...(node._loraList || [])];
                     const group = [];
-                    let insertAt = node.widgets.findIndex(widget => widget.name === "_add_lora_btn");
+                    let insertAt = node.widgets.indexOf(node._addBtnWidget);
                     if (insertAt < 0) insertAt = node.widgets.length;
 
                     const divider = makeDivider();
@@ -370,42 +370,14 @@ app.registerExtension({
                 node.setDirtyCanvas(true, true);
             }, 0);
 
-            const addBtn = {
-                name: "_add_lora_btn",
-                type: "button",
-                options: { serialize: false },
-                computeSize() { return [0, 32]; },
-                draw(ctx, nodeRef, width, y) {
-                    const bW = 140;
-                    const bH = 26;
-                    const bX = (width - bW) / 2;
-                    const bY = y + 3;
-                    ctx.fillStyle = "#1a2a1a";
-                    ctx.strokeStyle = "#3a6a3a";
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.roundRect(bX, bY, bW, bH, 5);
-                    ctx.fill();
-                    ctx.stroke();
-                    ctx.fillStyle = "#5ecc5e";
-                    ctx.font = "bold 12px monospace";
-                    ctx.textAlign = "center";
-                    ctx.fillText("+ Add LoRA", width / 2, bY + 18);
-                    ctx.textAlign = "left";
-                    addBtn._bounds = { x: bX, y: 3, w: bW, h: bH };
-                },
-                mouse(event, pos) {
-                    if (event.type !== "pointerdown") return false;
-                    const [mx, my] = pos;
-                    const b = addBtn._bounds;
-                    if (b && mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
-                        addSlot({ use_case: "Edit" });
-                        return true;
-                    }
-                    return false;
-                },
-            };
-            node.widgets.push(addBtn);
+            const addBtn = node.addWidget("button", "+ Add LoRA", null, () => {
+                addSlot({ use_case: "Edit" });
+            }, {
+                serialize: false,
+            });
+            addBtn.computeSize = () => [0, 32];
+            addBtn.tooltip = "Add a new LoRA slot with its own strength, use case, mode, and balance.";
+            node._addBtnWidget = addBtn;
 
             const MIN_WIDTH = 360;
             if (node.size[0] < MIN_WIDTH) node.size[0] = MIN_WIDTH;
