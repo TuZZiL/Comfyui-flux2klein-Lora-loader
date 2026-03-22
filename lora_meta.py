@@ -15,6 +15,11 @@ from pathlib import Path
 from collections import defaultdict
 
 try:
+    from .lora_compat import parse_lora_key
+except ImportError:
+    from lora_compat import parse_lora_key
+
+try:
     import numpy as np
     HAS_NUMPY = True
 except ImportError:
@@ -28,6 +33,7 @@ DTYPE_SIZES = {
     "F64": 8, "F32": 4, "F16": 2, "BF16": 2,
     "I64": 8, "I32": 4, "I16": 2, "I8": 1, "U8": 1, "BOOL": 1,
 }
+_ANALYSIS_CACHE = {}
 
 def read_header(path: Path):
     with open(path, "rb") as f:
@@ -101,30 +107,13 @@ def detect_lora_type(keys):
         return "LoKr"
     if "loha" in k or "hada" in k:
         return "LoHa"
-    if "lora_down" in k or "lora_a" in k:
+    if any(token in k for token in ("lora_down", "lora.down", "lora_a")):
         return "Standard LoRA"
     return "Unknown"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LAYER PARSING
 # ─────────────────────────────────────────────────────────────────────────────
-
-def parse_lora_key(key: str):
-    """
-    Returns (base_key, role) where role is one of:
-      lora_down / lora_up / alpha / dora_scale / bias / other
-    """
-    k = key
-    for suffix in ["lora_down.weight", "lora_up.weight",
-                   "lora_A.weight", "lora_B.weight",
-                   "lora_A.default.weight", "lora_B.default.weight",
-                   "alpha", "dora_scale", "bias"]:
-        if k.endswith("." + suffix) or k.endswith("_" + suffix):
-            base = k[: -(len(suffix) + 1)]
-            role = (suffix.replace(".default.weight", "").replace(".weight", "")
-                         .replace("lora_A", "lora_down").replace("lora_B", "lora_up"))
-            return base, role
-    return k, "other"
 
 def layer_type(base_key: str):
     k = base_key.lower()
@@ -507,7 +496,11 @@ def analyse_for_node(path):
     """
     from collections import defaultdict
 
-    path = Path(path)
+    path = Path(path).resolve()
+    cache_key = (str(path), path.stat().st_size, path.stat().st_mtime_ns)
+    cached = _ANALYSIS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     meta, header, data_offset = read_header(path)
 
     # Build layers dict: base_key → {role: tensor_info}
@@ -602,7 +595,7 @@ def analyse_for_node(path):
     # Aggregate
     all_alphas = list(alpha_values.values())
 
-    return {
+    result = {
         "db": {
             i: {
                 "img": float(np.mean(db_img[i])) if db_img.get(i) else None,
@@ -618,3 +611,5 @@ def analyse_for_node(path):
         "alpha":       float(np.mean(all_alphas)) if all_alphas else None,
         "layer_stats": all_layer_stats,
     }
+    _ANALYSIS_CACHE[cache_key] = result
+    return result

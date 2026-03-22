@@ -43,7 +43,6 @@ What it does:
 """
 
 import json
-import re
 import torch
 import numpy as np
 import comfy.utils
@@ -52,6 +51,7 @@ import folder_paths
 import logging
 
 from .edit_presets import EDIT_PRESETS, PRESET_NAMES, interpolate_preset, auto_select_preset
+from .lora_compat import normalize_lora_keys, build_compatibility_report
 from .schedules import SCHEDULE_NAMES, build_keyframes
 
 logger = logging.getLogger(__name__)
@@ -94,23 +94,7 @@ def _is_diffusers_format(lora_sd):
 
 def _normalize_keys(lora_sd):
     """Strip prefix variations and remap diffusers layer names to native."""
-    out = {}
-    for key, val in lora_sd.items():
-        k = key
-        for pfx in ("transformer.", "diffusion_model.", "unet."):
-            if k.startswith(pfx):
-                k = k[len(pfx):]
-                break
-        k = re.sub(r'^transformer_blocks\.',        'double_blocks.', k)
-        k = re.sub(r'^single_transformer_blocks\.', 'single_blocks.', k)
-        k = k.replace(".lora_down.", ".lora_A.").replace(".lora_up.", ".lora_B.")
-        k = k.replace(".lora_A.default.", ".lora_A.").replace(".lora_B.default.", ".lora_B.")
-        k = k.replace(".ff.linear_in.", ".ff.net.0.proj.")
-        k = k.replace(".ff.linear_out.", ".ff.net.2.")
-        k = k.replace(".ff_context.linear_in.", ".ff_context.net.0.proj.")
-        k = k.replace(".ff_context.linear_out.", ".ff_context.net.2.")
-        out[k] = val
-    return out
+    return normalize_lora_keys(lora_sd)
 
 
 def _alpha_scale(norm, base):
@@ -333,7 +317,7 @@ def _apply_layer_strengths(lora_sd, layer_cfg, global_strength):
 
 def _apply_edit_multipliers(lora_sd, preset_cfg):
     """
-    Scale lora_B tensors by edit-mode preset multipliers.
+    Scale lora_B/lora_up tensors by edit-mode preset multipliers.
     Applies multipliers directly: tensor * multiplier.
     """
     db_cfg = {str(k): v for k, v in preset_cfg.get("db", {}).items()}
@@ -341,7 +325,7 @@ def _apply_edit_multipliers(lora_sd, preset_cfg):
     scaled = {}
 
     for key, tensor in lora_sd.items():
-        if not key.endswith(".lora_B.weight"):
+        if not (key.endswith(".lora_B.weight") or key.endswith(".lora_up.weight")):
             scaled[key] = tensor
             continue
         parts = key.split(".")
@@ -382,6 +366,65 @@ def _build_key_map(model):
             key_map[f"{pfx}{bare}"] = model_key
         key_map["lora_unet_" + bare.replace(".", "_")] = model_key
     return key_map
+
+
+def _collect_compatibility_report(lora_sd, key_map):
+    """Estimate LoRA compatibility against the current model key map."""
+    return build_compatibility_report(_normalize_keys(lora_sd).keys(), key_map)
+
+
+def _resolved_compatibility_counts(report, applied_modules=None):
+    total = report.get("total_modules", 0)
+    estimated = report.get("matched_modules", 0)
+    matched = estimated if applied_modules is None else min(estimated, applied_modules, total)
+    skipped = max(total - matched, 0)
+    incomplete = report.get("incomplete_modules", 0)
+    return matched, total, skipped, incomplete
+
+
+def _compatibility_status(matched, total, incomplete):
+    if matched <= 0:
+        return "failed"
+    if matched < total or incomplete > 0:
+        return "partial"
+    return "ok"
+
+
+def _log_compatibility_report(node_label, report, applied_modules=None):
+    matched, total, skipped, incomplete = _resolved_compatibility_counts(report, applied_modules)
+    logger.info(
+        f"[{node_label}] Compatibility {matched}/{total} matched"
+        f" | skipped={skipped} | incomplete={incomplete}"
+    )
+    if applied_modules is not None and report.get("matched_modules", 0) != applied_modules:
+        logger.warning(
+            f"[{node_label}] Compatibility estimate mismatch:"
+            f" expected {report.get('matched_modules', 0)} matched, applied {applied_modules}"
+        )
+    for base in report.get("sample_skipped", ()):
+        logger.warning(f"[{node_label}] Skipped module: {base}")
+    for base in report.get("sample_incomplete", ()):
+        logger.warning(f"[{node_label}] Incomplete module pair: {base}")
+
+
+def _send_compatibility_report(node_id, report, applied_modules=None):
+    if node_id is None:
+        return
+    matched, total, skipped, incomplete = _resolved_compatibility_counts(report, applied_modules)
+    try:
+        from server import PromptServer
+        PromptServer.instance.send_sync(
+            "flux_lora.compat_report",
+            {
+                "node": str(node_id),
+                "status": _compatibility_status(matched, total, incomplete),
+                "matched_modules": int(matched),
+                "total_modules": int(total),
+                "skipped_modules": int(skipped),
+            },
+        )
+    except Exception:
+        logger.exception("[FLUX LoRA] Failed to send compatibility report to UI")
 
 
 # ── Edit-mode resolution ─────────────────────────────────────────────────────
@@ -462,7 +505,8 @@ def _compute_strengths(analysis, global_strength):
 # ── Unified load-and-patch helper ─────────────────────────────────────────────
 
 def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance,
-                    layer_cfg=None, auto_strength=False, node_label="FLUX LoRA"):
+                    layer_cfg=None, auto_strength=False, node_label="FLUX LoRA",
+                    node_id=None):
     """
     Shared pipeline: load → convert → apply edits → apply layer strengths → patch.
     Returns patched model clone.
@@ -480,6 +524,18 @@ def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance
         analysis = analyse_for_node(lora_path)
         layer_cfg = _compute_strengths(analysis, abs(strength))
         logger.info(f"[{node_label}] Auto-strength computed for {lora_name}")
+        if node_id is not None:
+            try:
+                from server import PromptServer
+                PromptServer.instance.send_sync(
+                    "flux_lora.auto_strength",
+                    {
+                        "node": str(node_id),
+                        "layer_strengths": json.dumps(layer_cfg, sort_keys=True),
+                    },
+                )
+            except Exception:
+                logger.exception(f"[{node_label}] Failed to send auto-strength update to UI")
 
     # Resolve edit-mode preset
     edit_preset_cfg = _resolve_edit_mode(edit_mode, balance, lora_path, node_label)
@@ -499,7 +555,10 @@ def _load_and_patch(model, lora_name, strength, auto_convert, edit_mode, balance
 
     # Build patches and apply
     key_map = _build_key_map(model)
+    compat_report = _collect_compatibility_report(lora_sd, key_map)
     patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
+    _log_compatibility_report(node_label, compat_report, applied_modules=len(patch_dict))
+    _send_compatibility_report(node_id, compat_report, applied_modules=len(patch_dict))
     logger.info(f"[{node_label}] Applied {len(patch_dict)} patches")
 
     model_out = model.clone()
@@ -558,6 +617,9 @@ class FluxLoraLoader:
                 # Written by the JS graph widget — never shown as a text box
                 "layer_strengths": ("STRING", {"default": "{}"}),
             },
+            "hidden": {
+                "node_id": "UNIQUE_ID",
+            },
         }
 
     RETURN_TYPES = ("MODEL",)
@@ -567,7 +629,7 @@ class FluxLoraLoader:
 
     def load_lora(self, model, lora_name, strength,
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
-                  edit_mode="None", balance=0.5):
+                  edit_mode="None", balance=0.5, node_id=None):
         if strength == 0:
             return (model,)
 
@@ -583,7 +645,7 @@ class FluxLoraLoader:
         model_out = _load_and_patch(
             model, lora_name, strength, auto_convert, edit_mode, balance,
             layer_cfg=layer_cfg, auto_strength=auto_strength,
-            node_label="FLUX LoRA Loader",
+            node_label="FLUX LoRA Loader", node_id=node_id,
         )
         return (model_out,)
 
@@ -747,7 +809,9 @@ class FluxLoraScheduled:
 
         # Build patches
         key_map = _build_key_map(model)
+        compat_report = _collect_compatibility_report(lora_sd, key_map)
         patch_dict = comfy.lora.load_lora(lora_sd, key_map, log_missing=False)
+        _log_compatibility_report("FLUX LoRA Scheduled", compat_report, applied_modules=len(patch_dict))
         logger.info(f"[FLUX LoRA Scheduled] {len(patch_dict)} patches, schedule='{schedule}', keyframes={keyframes}")
 
         # Create hook with scheduling

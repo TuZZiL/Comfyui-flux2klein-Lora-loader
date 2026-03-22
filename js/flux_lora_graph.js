@@ -33,7 +33,8 @@ const PAD       = 10;
 const GRAPH_H   = 170;
 const BTN_ROW_H = 26;
 const LABEL_H   = 18;
-const WIDGET_H  = GRAPH_H + BTN_ROW_H + LABEL_H + PAD * 4;
+const BADGE_H   = 18;
+const WIDGET_H  = GRAPH_H + BTN_ROW_H + LABEL_H + BADGE_H + PAD * 4;
 const MIN_NODE_W = 430;
 
 // Fraction of graph width for each section
@@ -73,6 +74,44 @@ function defaultStrengths() {
 app.registerExtension({
     name: "Comfy.FluxLoraGraph",
 
+    async setup() {
+        function findNodeByExecutionId(executionId) {
+            const target = String(executionId ?? "");
+            if (!target) return null;
+            const localId = Number(target.split(":").at(-1));
+            if (!Number.isFinite(localId)) return null;
+            return app.graph?._nodes?.find((node) => node?.id === localId && node?.type === "FluxLoraLoader") ?? null;
+        }
+
+        function messageHandler(event) {
+            const detail = event?.detail ?? {};
+            const node = findNodeByExecutionId(detail.node);
+            const value = detail.layer_strengths;
+            if (!node || typeof value !== "string") return;
+            const widget = node.widgets?.find((w) => w.name === "layer_strengths");
+            if (!widget) return;
+            widget.value = value;
+            widget.callback?.(value);
+            node.setDirtyCanvas(true, true);
+        }
+
+        function compatHandler(event) {
+            const detail = event?.detail ?? {};
+            const node = findNodeByExecutionId(detail.node);
+            if (!node) return;
+            node._fluxCompatReport = {
+                status: detail.status ?? "failed",
+                matched_modules: Number(detail.matched_modules ?? 0),
+                total_modules: Number(detail.total_modules ?? 0),
+                skipped_modules: Number(detail.skipped_modules ?? 0),
+            };
+            node.setDirtyCanvas(true, true);
+        }
+
+        app.api.addEventListener("flux_lora.auto_strength", messageHandler);
+        app.api.addEventListener("flux_lora.compat_report", compatHandler);
+    },
+
     async beforeRegisterNodeDef(nodeType, nodeData) {
         if (nodeData.name !== "FluxLoraLoader") return;
 
@@ -91,6 +130,7 @@ app.registerExtension({
 
             // ── State ─────────────────────────────────────────────────────────
             let strengths = defaultStrengths();
+            node._fluxCompatReport = null;
 
             // Last non-zero trackers for toggle
             const lastDb = {};
@@ -477,6 +517,35 @@ app.registerExtension({
                     ctx.fillStyle = "#3a3a5a";
                     if (helpX > legendX) {
                         ctx.fillText(helpText, helpX, legendY);
+                    }
+
+                    const compat = node._fluxCompatReport;
+                    if (compat) {
+                        const badgeText = `Compat ${compat.matched_modules}/${compat.total_modules}`;
+                        const badgeY = lY + LABEL_H + 3;
+                        const badgeW = Math.max(84, ctx.measureText(badgeText).width + 16);
+                        const badgeX = gX + 2;
+                        let fill = "#2a1a1a";
+                        let stroke = "#5a2a2a";
+                        let text = "#ff9b9b";
+                        if (compat.status === "ok") {
+                            fill = "#14261a";
+                            stroke = "#2f6a42";
+                            text = "#9bf0b6";
+                        } else if (compat.status === "partial") {
+                            fill = "#2a2412";
+                            stroke = "#7a6230";
+                            text = "#ffd37a";
+                        }
+                        roundRect(ctx, badgeX, badgeY, badgeW, BADGE_H - 4, 4);
+                        ctx.fillStyle = fill;
+                        ctx.fill();
+                        ctx.strokeStyle = stroke;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                        ctx.fillStyle = text;
+                        ctx.font = "bold 9px monospace";
+                        ctx.fillText(badgeText, badgeX + 8, badgeY + 10);
                     }
                 },
 

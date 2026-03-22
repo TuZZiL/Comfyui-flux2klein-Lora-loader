@@ -205,29 +205,44 @@ def auto_select_preset(analysis):
     Analyze ΔW norms from lora_meta.analyse_for_node() and pick the best
     preset + balance automatically.
 
-    Decision logic based on where the training signal concentrates:
-      - late_ratio > 1.3  →  LoRA aggressively affects identity → Preserve Body
-      - late_ratio > 1.1  →  moderate identity impact → Preserve Face
-      - db_ratio > 0.8    →  uniform/structural LoRA → None (safe as-is)
-      - otherwise         →  Preserve Face (safe default)
+    Decision logic is intentionally conservative for edit workflows:
+      - strong late single-block dominance           → Preserve Body
+      - moderate late/mid single-block dominance     → Preserve Face
+      - image-heavy double blocks with calm singles  → Style Only
+      - full-coverage uniform LoRA                   → Preserve Face
+      - very soft / sparse structural LoRA           → None
+      - otherwise                                    → Preserve Face
 
     Balance is computed from max/mean ratio:
       - Higher concentration = lower balance (more protection needed)
 
     Returns: (preset_name: str, balance: float)
     """
+    def mean_or_zero(values):
+        return (sum(values) / len(values)) if values else 0.0
+
     db_norms = []
+    db_img = []
+    db_txt = []
     sb_early, sb_mid, sb_late = [], [], []
+    active_components = 0
 
     for i in range(N_DOUBLE):
         db = analysis.get("db", {}).get(i, {})
         if isinstance(db, dict):
-            if db.get("img"): db_norms.append(db["img"])
-            if db.get("txt"): db_norms.append(db["txt"])
+            if db.get("img") is not None:
+                db_norms.append(db["img"])
+                db_img.append(db["img"])
+                active_components += 1
+            if db.get("txt") is not None:
+                db_norms.append(db["txt"])
+                db_txt.append(db["txt"])
+                active_components += 1
 
     for i in range(N_SINGLE):
         v = analysis.get("sb", {}).get(i)
         if v is not None:
+            active_components += 1
             if i < 8:
                 sb_early.append(v)
             elif i < 16:
@@ -244,19 +259,29 @@ def auto_select_preset(analysis):
         return ("Preserve Face", 0.40)
 
     max_all = max(all_norms)
-    late_mean = sum(sb_late) / len(sb_late) if sb_late else 0
-    db_mean = sum(db_norms) / len(db_norms) if db_norms else 0
+    late_mean = mean_or_zero(sb_late)
+    mid_mean = mean_or_zero(sb_mid)
+    db_mean = mean_or_zero(db_norms)
+    img_mean = mean_or_zero(db_img)
+    txt_mean = mean_or_zero(db_txt)
 
     late_ratio = late_mean / mean_all
+    mid_ratio = mid_mean / mean_all
     db_ratio = db_mean / mean_all
     max_ratio = max_all / mean_all
+    img_txt_ratio = (img_mean / txt_mean) if txt_mean > 1e-8 else 1.0
+    coverage_ratio = active_components / float(N_DOUBLE * 2 + N_SINGLE)
 
     # Pick preset
-    if late_ratio > 1.3:
+    if late_ratio > 1.30 or (late_ratio > 1.20 and max_ratio > 1.35):
         preset = "Preserve Body"
-    elif late_ratio > 1.1:
+    elif late_ratio > 1.08 or mid_ratio > 1.05:
         preset = "Preserve Face"
-    elif db_ratio > 0.8 and late_ratio < 1.0:
+    elif img_txt_ratio > 1.18 and late_ratio < 1.00 and mid_ratio < 1.02:
+        preset = "Style Only"
+    elif coverage_ratio > 0.85:
+        preset = "Preserve Face"
+    elif db_ratio > 0.85 and late_ratio < 0.95 and max_ratio < 1.12:
         preset = "None"
     else:
         preset = "Preserve Face"
@@ -265,7 +290,10 @@ def auto_select_preset(analysis):
     # max_ratio 1.0–1.2 → balance ~0.55 (mild)
     # max_ratio 1.5–2.0 → balance ~0.25 (strong protection)
     balance = max(0.20, min(0.60, 0.70 - 0.25 * max_ratio))
+    if preset == "None":
+        balance = max(balance, 0.55)
+    elif preset == "Style Only":
+        balance = max(balance, 0.35)
     balance = round(balance / 0.05) * 0.05  # snap to 0.05 grid
 
     return (preset, balance)
-
