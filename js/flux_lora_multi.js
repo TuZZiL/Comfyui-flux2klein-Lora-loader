@@ -79,6 +79,26 @@ function makeDivider() {
     };
 }
 
+function fitText(ctx, text, maxWidth) {
+    if (!text || maxWidth <= 0) return "";
+    if (ctx.measureText(text).width <= maxWidth) return text;
+
+    let out = text;
+    while (out.length > 1 && ctx.measureText(`${out}…`).width > maxWidth) {
+        out = out.slice(0, -1);
+    }
+    return `${out}…`;
+}
+
+function summarizeSlot(data) {
+    const state = data.enabled ? "On" : "Off";
+    const loraName = data.lora && data.lora !== "None"
+        ? data.lora.replace(/\.[^.]+$/, "")
+        : "No LoRA";
+    const mode = data.edit_mode === "None" ? "Standard" : data.edit_mode;
+    return `${state} • ${loraName} • ${Number(data.strength ?? 0).toFixed(2)} • ${mode}`;
+}
+
 app.registerExtension({
     name: "Comfy.FluxLoraMulti",
 
@@ -175,7 +195,13 @@ app.registerExtension({
                         ctx.font      = "bold 11px monospace";
                         ctx.textAlign = "center";
                         ctx.fillText("✕", bX + bW / 2, bY + 14);
+
+                        const summaryX = 62;
+                        ctx.font      = "9px monospace";
+                        const summary = fitText(ctx, summarizeSlot(data), Math.max(30, bX - summaryX - 8));
+                        ctx.fillStyle = "#8a8aa6";
                         ctx.textAlign = "left";
+                        ctx.fillText(summary, summaryX, y + 16);
 
                         // Store button bounds for click detection
                         header._removeBounds = { x: bX, y: 3, w: bW, h: bH };
@@ -196,7 +222,7 @@ app.registerExtension({
                 widgets.push(header);
 
                 // Enabled toggle
-                const enabledW = node.addWidget("toggle", `_enabled_${idx}`, data.enabled, (v) => {
+                const enabledW = node.addWidget("toggle", "Enabled", data.enabled, (v) => {
                     data.enabled = v;
                     syncSlotData();
                 }, { on: "On", off: "Off", serialize: false });
@@ -206,7 +232,7 @@ app.registerExtension({
                 widgets.push(enabledW);
 
                 // LoRA combo
-                const loraW = node.addWidget("combo", `_lora_${idx}`, data.lora, (v) => {
+                const loraW = node.addWidget("combo", "LoRA", data.lora, (v) => {
                     data.lora = v;
                     syncSlotData();
                 }, { values: loraValues, serialize: false });
@@ -215,7 +241,7 @@ app.registerExtension({
                 widgets.push(loraW);
 
                 // Strength
-                const strengthW = node.addWidget("number", `_strength_${idx}`, data.strength, (v) => {
+                const strengthW = node.addWidget("number", "Strength", data.strength, (v) => {
                     data.strength = v;
                     syncSlotData();
                 }, { min: -5.0, max: 5.0, step: 0.05, precision: 2, serialize: false });
@@ -224,7 +250,7 @@ app.registerExtension({
                 widgets.push(strengthW);
 
                 // Edit mode combo
-                const editW = node.addWidget("combo", `_edit_mode_${idx}`, data.edit_mode, (v) => {
+                const editW = node.addWidget("combo", "Mode", data.edit_mode, (v) => {
                     data.edit_mode = v;
                     syncSlotData();
                 }, { values: EDIT_MODES, serialize: false });
@@ -233,7 +259,7 @@ app.registerExtension({
                 widgets.push(editW);
 
                 // Balance
-                const balanceW = node.addWidget("number", `_balance_${idx}`, data.balance, (v) => {
+                const balanceW = node.addWidget("number", "Balance", data.balance, (v) => {
                     data.balance = v;
                     syncSlotData();
                 }, { min: 0.0, max: 1.0, step: 0.05, precision: 2, serialize: false });

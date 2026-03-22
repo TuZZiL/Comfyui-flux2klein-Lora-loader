@@ -34,6 +34,7 @@ const GRAPH_H   = 170;
 const BTN_ROW_H = 26;
 const LABEL_H   = 18;
 const WIDGET_H  = GRAPH_H + BTN_ROW_H + LABEL_H + PAD * 4;
+const MIN_NODE_W = 430;
 
 // Fraction of graph width for each section
 const DB_FRAC = N_DOUBLE / (N_DOUBLE + N_SINGLE);  // 8/32 = 0.25
@@ -242,9 +243,9 @@ app.registerExtension({
                     const bH  = BTN_ROW_H - 4;
                     const btnW = iW * 0.3;
                     const btns = [
-                        { key: "reset",   label: "↺ Reset All",     x: PAD              },
-                        { key: "mirror",  label: "⇄ Img→Txt",       x: PAD + iW * 0.34  },
-                        { key: "flatten", label: "▬ Flatten",        x: PAD + iW * 0.62  },
+                        { key: "reset",   label: "↺ Reset",          x: PAD              },
+                        { key: "mirror",  label: "Copy img→txt",     x: PAD + iW * 0.34  },
+                        { key: "flatten", label: "Match global",     x: PAD + iW * 0.62  },
                     ];
                     btns.forEach(btn => {
                         _btnBounds[btn.key] = { ...btn, w: btnW, h: bH, y: bY };
@@ -450,14 +451,33 @@ app.registerExtension({
                     const lY = gY + gH + 6;
                     ctx.fillStyle = "#4a4a6a"; ctx.font = "8px monospace";
                     ctx.fillText(`global: ${gs.toFixed(2)}`, gX + 2, lY + 11);
+
+                    const legendY = lY + 11;
+                    let legendX = gX + 64;
+
                     ctx.fillStyle = "#5533aa";
-                    ctx.fillText("■ img", gX + 64, lY + 11);
+                    ctx.fillText("■ image", legendX, legendY);
+                    legendX += ctx.measureText("■ image").width + 10;
+
                     ctx.fillStyle = "#2a7a9a";
-                    ctx.fillText("■ txt", gX + 96, lY + 11);
+                    ctx.fillText("■ text", legendX, legendY);
+                    legendX += ctx.measureText("■ text").width + 10;
+
                     ctx.fillStyle = "#2a6a4a";
-                    ctx.fillText("■ single", gX + 124, lY + 11);
+                    ctx.fillText("■ single", legendX, legendY);
+                    legendX += ctx.measureText("■ single").width + 16;
+
+                    const helpText = gW >= 520
+                        ? "drag to adjust • click toggles • shift moves all"
+                        : gW >= 450
+                            ? "drag • click toggle • shift all"
+                            : "drag • click • shift";
+                    const helpWidth = ctx.measureText(helpText).width;
+                    const helpX = gX + gW - helpWidth - 4;
                     ctx.fillStyle = "#3a3a5a";
-                    ctx.fillText("drag↕ | click=toggle | shift=all", gX + gW - 200, lY + 11);
+                    if (helpX > legendX) {
+                        ctx.fillText(helpText, helpX, legendY);
+                    }
                 },
 
                 mouse(event, pos, node) {
@@ -557,6 +577,9 @@ app.registerExtension({
 
             if (!node.widgets) node.widgets = [];
             node.widgets.push(gw);
+            if (node.size[0] < MIN_NODE_W) {
+                node.size[0] = MIN_NODE_W;
+            }
             node.setSize(node.computeSize());
 
             // ── Restore state after workflow reload ────────────────────────────
