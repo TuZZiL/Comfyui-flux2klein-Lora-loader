@@ -178,7 +178,7 @@ app.registerExtension({
                         ctx.textAlign = "left";
 
                         // Store button bounds for click detection
-                        header._removeBounds = { x: bX, y: bY, w: bW, h: bH };
+                        header._removeBounds = { x: bX, y: 3, w: bW, h: bH };
                     },
                     mouse(event, pos) {
                         if (event.type !== "pointerdown") return false;
@@ -290,7 +290,7 @@ app.registerExtension({
                     ctx.textAlign = "center";
                     ctx.fillText("+ Add LoRA", width / 2, bY + 18);
                     ctx.textAlign = "left";
-                    addBtn._bounds = { x: bX, y: bY, w: bW, h: bH };
+                    addBtn._bounds = { x: bX, y: 3, w: bW, h: bH };
                 },
                 mouse(event, pos) {
                     if (event.type !== "pointerdown") return false;

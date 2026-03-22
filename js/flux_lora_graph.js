@@ -33,7 +33,7 @@ const PAD       = 10;
 const GRAPH_H   = 170;
 const BTN_ROW_H = 26;
 const LABEL_H   = 18;
-const WIDGET_H  = GRAPH_H + BTN_ROW_H + LABEL_H + PAD * 3;
+const WIDGET_H  = GRAPH_H + BTN_ROW_H + LABEL_H + PAD * 4;
 
 // Fraction of graph width for each section
 const DB_FRAC = N_DOUBLE / (N_DOUBLE + N_SINGLE);  // 8/32 = 0.25
