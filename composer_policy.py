@@ -20,41 +20,41 @@ GROUP_NAMES = ("db_img", "db_txt", "sb_early", "sb_mid", "sb_late")
 
 ROLE_POLICIES = {
     "Main Edit": {
-        "edit_mode": "Preserve Body",
-        "balance": 0.40,
+        "edit_mode": "None",
+        "balance": 0.50,
         "priority": 1.35,
-        "groups": {"db_img": 1.00, "db_txt": 0.92, "sb_early": 1.00, "sb_mid": 0.92, "sb_late": 0.72},
+        "groups": {"db_img": 1.00, "db_txt": 1.00, "sb_early": 1.00, "sb_mid": 1.00, "sb_late": 1.00},
     },
     "Style": {
         "edit_mode": "Style Only",
-        "balance": 0.35,
+        "balance": 0.70,
         "priority": 0.95,
-        "groups": {"db_img": 0.68, "db_txt": 1.00, "sb_early": 0.82, "sb_mid": 0.96, "sb_late": 0.86},
+        "groups": {"db_img": 0.92, "db_txt": 1.00, "sb_early": 0.98, "sb_mid": 1.00, "sb_late": 0.95},
     },
     "Detail": {
         "edit_mode": "None",
-        "balance": 0.60,
+        "balance": 0.75,
         "priority": 0.80,
-        "groups": {"db_img": 0.82, "db_txt": 0.86, "sb_early": 0.65, "sb_mid": 0.82, "sb_late": 1.00},
+        "groups": {"db_img": 0.95, "db_txt": 0.95, "sb_early": 0.92, "sb_mid": 0.96, "sb_late": 1.00},
     },
     "Identity": {
         "edit_mode": "Preserve Face",
-        "balance": 0.20,
+        "balance": 0.65,
         "priority": 1.20,
-        "groups": {"db_img": 1.00, "db_txt": 0.82, "sb_early": 0.92, "sb_mid": 0.76, "sb_late": 0.60},
+        "groups": {"db_img": 1.00, "db_txt": 0.95, "sb_early": 0.98, "sb_mid": 0.94, "sb_late": 0.88},
     },
     "Prompt Boost": {
         "edit_mode": "Boost Prompt",
-        "balance": 0.35,
+        "balance": 0.75,
         "priority": 0.90,
-        "groups": {"db_img": 0.76, "db_txt": 1.14, "sb_early": 0.88, "sb_mid": 1.04, "sb_late": 0.86},
+        "groups": {"db_img": 0.96, "db_txt": 1.06, "sb_early": 0.98, "sb_mid": 1.02, "sb_late": 0.98},
     },
 }
 
 GOAL_MODIFIERS = {
-    "Edit": {"db_img": 1.00, "db_txt": 0.95, "sb_early": 1.00, "sb_mid": 0.90, "sb_late": 0.74},
-    "Restyle": {"db_img": 0.90, "db_txt": 1.00, "sb_early": 0.88, "sb_mid": 1.00, "sb_late": 0.90},
-    "Generate": {"db_img": 0.96, "db_txt": 1.05, "sb_early": 1.00, "sb_mid": 1.05, "sb_late": 1.00},
+    "Edit": {"db_img": 1.00, "db_txt": 0.98, "sb_early": 1.00, "sb_mid": 0.96, "sb_late": 0.92},
+    "Restyle": {"db_img": 0.97, "db_txt": 1.00, "sb_early": 0.98, "sb_mid": 1.00, "sb_late": 0.97},
+    "Generate": {"db_img": 1.00, "db_txt": 1.02, "sb_early": 1.00, "sb_mid": 1.02, "sb_late": 1.00},
 }
 
 SAFETY_BUDGETS = {
@@ -165,6 +165,8 @@ def compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=
         if normalized["enabled"] and normalized["lora"] != "None" and abs(normalized["strength"]) > 1e-8:
             active_indices.append(index)
 
+    single_active_mode = len(active_indices) <= 1
+
     if auto_normalize and len(active_indices) > 1:
         for group in GROUP_NAMES:
             total_demand = sum(prepared[i]["demand"][group] for i in active_indices)
@@ -181,12 +183,15 @@ def compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=
                     prepared[i]["conflicts"].append(group)
 
     for entry in prepared:
-        final_groups = {
-            group: round(entry["base_groups"][group] * entry["group_factors"][group], 4)
-            for group in GROUP_NAMES
-        }
+        if single_active_mode:
+            final_groups = {group: 1.0 for group in GROUP_NAMES}
+        else:
+            final_groups = {
+                group: round(entry["base_groups"][group] * entry["group_factors"][group], 4)
+                for group in GROUP_NAMES
+            }
         entry["final_groups"] = final_groups
-        entry["layer_cfg"] = build_layer_cfg(final_groups)
+        entry["layer_cfg"] = {} if single_active_mode else build_layer_cfg(final_groups)
         entry["normalized"] = any(factor < 0.999 for factor in entry["group_factors"].values())
 
     return prepared

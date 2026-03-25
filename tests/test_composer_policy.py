@@ -77,6 +77,15 @@ class ComposerPolicyTests(unittest.TestCase):
             policies[1]["final_groups"]["sb_mid"],
         )
 
+    def test_single_active_slot_bypasses_layer_policy(self):
+        slots = [
+            {"enabled": True, "lora": "edit.safetensors", "strength": 1.0, "role": "Main Edit"},
+            {"enabled": False, "lora": "style.safetensors", "strength": 1.0, "role": "Style"},
+        ]
+        policies = compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=True)
+        self.assertEqual(policies[0]["layer_cfg"], {})
+        self.assertEqual(policies[0]["edit_mode"], "None")
+
 
 if __name__ == "__main__":
     unittest.main()
