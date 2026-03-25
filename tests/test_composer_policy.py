@@ -13,6 +13,7 @@ from composer_policy import (  # noqa: E402
     build_layer_cfg,
     compose_slot_policies,
     role_edit_profile,
+    _scale_budgets,
 )
 
 
@@ -85,6 +86,41 @@ class ComposerPolicyTests(unittest.TestCase):
         policies = compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=True)
         self.assertEqual(policies[0]["layer_cfg"], {})
         self.assertEqual(policies[0]["edit_mode"], "None")
+
+    def test_scale_budgets_unchanged_for_two_loras(self):
+        base = {"db_img": 2.80, "sb_late": 1.80}
+        self.assertEqual(_scale_budgets(base, 2), base)
+        self.assertEqual(_scale_budgets(base, 1), base)
+
+    def test_scale_budgets_reduces_for_four_loras(self):
+        base = {"db_img": 2.80, "sb_late": 1.80}
+        scaled = _scale_budgets(base, 4)
+        self.assertAlmostEqual(scaled["db_img"], 2.24)
+        self.assertAlmostEqual(scaled["sb_late"], 1.44)
+
+    def test_scale_budgets_floors_at_half(self):
+        base = {"db_img": 2.80}
+        scaled = _scale_budgets(base, 10)
+        self.assertAlmostEqual(scaled["db_img"], 2.80 * 0.50)
+
+    def test_four_loras_get_tighter_budgets_than_two(self):
+        slots_2 = [
+            {"enabled": True, "lora": "a.safetensors", "strength": 1.0, "role": "Main Edit"},
+            {"enabled": True, "lora": "b.safetensors", "strength": 1.0, "role": "Style"},
+        ]
+        slots_4 = slots_2 + [
+            {"enabled": True, "lora": "c.safetensors", "strength": 1.0, "role": "Detail"},
+            {"enabled": True, "lora": "d.safetensors", "strength": 1.0, "role": "Identity"},
+        ]
+        p2 = compose_slot_policies(slots_2, goal="Edit", safety="Balanced")
+        p4 = compose_slot_policies(slots_4, goal="Edit", safety="Balanced")
+        # With 4 LoRAs the Main Edit slot should be normalized more aggressively
+        active_2 = [e for e in p2 if e["slot"]["role"] == "Main Edit"][0]
+        active_4 = [e for e in p4 if e["slot"]["role"] == "Main Edit"][0]
+        self.assertLessEqual(
+            active_4["final_groups"]["sb_late"],
+            active_2["final_groups"]["sb_late"],
+        )
 
 
 if __name__ == "__main__":

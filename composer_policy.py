@@ -66,6 +66,21 @@ SAFETY_BUDGETS = {
 SAFETY_BALANCE_OFFSETS = {"Safe": -0.10, "Balanced": 0.0, "Strong": 0.10}
 
 
+def _scale_budgets(base_budgets, n_active):
+    """Reduce safety budgets for 3+ active LoRAs to prevent cross-interference.
+
+    More LoRAs pulling weights in different directions cause destructive
+    interference even when total magnitude stays within budget.  Scaling down
+    by ~10 % per extra LoRA beyond 2 keeps the combined perturbation safe.
+
+    n=2 → 1.00,  n=3 → 0.90,  n=4 → 0.80,  n=5 → 0.70  (floor 0.50)
+    """
+    if n_active <= 2:
+        return base_budgets
+    factor = max(0.50, 1.0 - 0.10 * (n_active - 2))
+    return {g: round(v * factor, 2) for g, v in base_budgets.items()}
+
+
 def _clamp(value, low, high):
     return max(low, min(high, value))
 
@@ -141,7 +156,7 @@ def build_layer_cfg(group_profile):
 
 def compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=True):
     slots = assign_main_edit(slots)
-    budgets = SAFETY_BUDGETS.get(safety, SAFETY_BUDGETS["Balanced"])
+    base_budgets = SAFETY_BUDGETS.get(safety, SAFETY_BUDGETS["Balanced"])
     prepared = []
     active_indices = []
 
@@ -166,6 +181,7 @@ def compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=
             active_indices.append(index)
 
     single_active_mode = len(active_indices) <= 1
+    budgets = _scale_budgets(base_budgets, len(active_indices))
 
     if auto_normalize and len(active_indices) > 1:
         for group in GROUP_NAMES:

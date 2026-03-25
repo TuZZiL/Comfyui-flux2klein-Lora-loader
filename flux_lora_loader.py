@@ -869,7 +869,7 @@ class FluxLoraComposer:
             prepared = _prepare_patch_data(
                 current,
                 slot["lora"],
-                slot["strength"],
+                1.0,
                 auto_convert,
                 entry["edit_mode"],
                 entry["balance"],
@@ -884,7 +884,7 @@ class FluxLoraComposer:
             current = current.clone()
             current.add_patches(
                 prepared["patch_dict"],
-                strength_patch=1.0,
+                strength_patch=slot["strength"],
                 strength_model=1.0,
             )
 
