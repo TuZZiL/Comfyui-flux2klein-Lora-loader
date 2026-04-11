@@ -143,6 +143,26 @@ FluxLoraScheduled → MODEL → CFGGuider
 
 Ці ноди зроблені в простому ComfyUI-стилі: одна нода = одна задача, стандартні поля, без зайвої візуальної обгортки.
 
+### TUZ Klein Edit Composite
+
+Postprocess-нода для акуратного повернення згенерованого edit-результату на original image. Вона має стояти після decode, а не всередині LoRA pipeline.
+
+Рекомендований flow:
+```text
+original image + edit generation -> VAE Decode -> TUZ Klein Edit Composite -> save
+```
+
+Потрібна залежність:
+```bash
+pip install opencv-python-headless
+```
+
+Найкраще підходить для:
+- локальних правок одягу та аксесуарів
+- touchup обличчя
+- контрольованої заміни об'єктів
+- прибирання drift на фоні після генерації
+
 ## Пресети редагування
 
 Краще думати про `edit_mode` як про **рівень захисту**, а не як про “тип LoRA”. Різні edit LoRA на Klein можуть поводитися дуже по-різному:

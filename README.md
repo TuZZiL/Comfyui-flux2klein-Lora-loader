@@ -143,6 +143,26 @@ These nodes control reference-latent behavior and prompt-conditioning without ch
 
 These nodes are designed to be simple ComfyUI-style controls: one job per node, plain widgets, and no extra visual chrome.
 
+### TUZ Klein Edit Composite
+
+Postprocess node for merging a generated edit back onto the original image. This is the right place for final cleanup after decode, not inside the LoRA pipeline.
+
+Recommended flow:
+```text
+original image + edit generation -> VAE Decode -> TUZ Klein Edit Composite -> save
+```
+
+Install note:
+```bash
+pip install opencv-python-headless
+```
+
+Best use cases:
+- local clothing/accessory edits
+- face-preserving touchups
+- controlled object replacement
+- cleanup of background drift after generation
+
 ## Edit Mode Presets
 
 Think of `edit_mode` as a **protection level**, not as a category label for the LoRA itself. Different edit LoRAs can belong to the same practical bucket:

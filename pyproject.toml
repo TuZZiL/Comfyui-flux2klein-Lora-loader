@@ -3,6 +3,9 @@ name = "Comfyui-flux2klein-Lora-loader"
 description = "Architecture-aware LoRA loader for FLUX.2 Klein in ComfyUI with automatic per-layer strength calibration."
 version = "1.0.0"
 license = {file = "LICENSE"} 
+dependencies = [
+    "opencv-python-headless>=4.10",
+]
 # classifiers = [
 #     # For OS-independent nodes (works on all operating systems)
 #     "Operating System :: OS Independent",
