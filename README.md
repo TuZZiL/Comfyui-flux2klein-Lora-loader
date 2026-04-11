@@ -157,6 +157,29 @@ Install note:
 pip install opencv-python-headless
 ```
 
+Fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `generated_image` | IMAGE | The edited / generated image to composite back onto the source. |
+| `original_image` | IMAGE | The untouched source image used as the base. |
+| `delta_e_threshold` | FLOAT | Change sensitivity. Set `-1` for auto-thresholding. |
+| `flow_quality` | choice | Optical flow precision: `medium`, `fast`, or `ultrafast`. |
+| `use_occlusion` | BOOLEAN | Adds forward-backward flow consistency to the mask. |
+| `occlusion_threshold` | FLOAT | Occlusion sensitivity. Set `-1` for auto-thresholding. |
+| `noise_removal_pct` | FLOAT | Removes speckle noise from the mask as a % of image diagonal. |
+| `close_radius_pct` | FLOAT | Morphological close radius as a % of image diagonal. |
+| `fill_holes` | BOOLEAN | Fills enclosed holes inside the detected mask. |
+| `fill_borders` | BOOLEAN | Extends the mask into warped border voids. |
+| `max_islands` | INT | Keeps only the largest N connected mask regions. `0` disables pruning. |
+| `grow_mask_pct` | FLOAT | Grows or shrinks the final mask as a % of image diagonal. |
+| `feather_pct` | FLOAT | Softens the final blend edge as a % of image diagonal. |
+| `color_match_blend` | FLOAT | Blends generated colors toward the original background. |
+| `poisson_blend_edges` | BOOLEAN | Uses Poisson/seamless blending for edges when possible. |
+| `custom_mask` | MASK | Optional external mask to replace or adjust auto-detection. |
+| `custom_mask_mode` | choice | How to combine the external mask: `replace`, `add`, or `subtract`. |
+| `enable_debug` | BOOLEAN | Emits a debug gallery and richer report text. |
+
 Best use cases:
 - local clothing/accessory edits
 - face-preserving touchups

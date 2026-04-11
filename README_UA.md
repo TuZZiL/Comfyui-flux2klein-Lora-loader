@@ -157,6 +157,29 @@ original image + edit generation -> VAE Decode -> TUZ Klein Edit Composite -> sa
 pip install opencv-python-headless
 ```
 
+Поля ноди:
+
+| Поле | Тип | Що означає |
+|---|---|---|
+| `generated_image` | IMAGE | Змінене / згенероване зображення, яке треба накласти назад. |
+| `original_image` | IMAGE | Чисте джерело, на яке композититься результат. |
+| `delta_e_threshold` | FLOAT | Чутливість до змін. `-1` вмикає auto-threshold. |
+| `flow_quality` | choice | Якість optical flow: `medium`, `fast`, `ultrafast`. |
+| `use_occlusion` | BOOLEAN | Додає consistency перевірку flow у маску. |
+| `occlusion_threshold` | FLOAT | Чутливість до occlusion. `-1` вмикає auto-threshold. |
+| `noise_removal_pct` | FLOAT | Прибирає шум/крапки з маски як % діагоналі зображення. |
+| `close_radius_pct` | FLOAT | Radius для morphological close як % діагоналі. |
+| `fill_holes` | BOOLEAN | Заповнює внутрішні дірки в масці. |
+| `fill_borders` | BOOLEAN | Розтягує маску в порожні warped-border області. |
+| `max_islands` | INT | Залишає тільки найбільші N connected regions. `0` вимикає. |
+| `grow_mask_pct` | FLOAT | Збільшує або зменшує маску як % діагоналі. |
+| `feather_pct` | FLOAT | Пом’якшує край фінального blend як % діагоналі. |
+| `color_match_blend` | FLOAT | Підтягує кольори generated до original background. |
+| `poisson_blend_edges` | BOOLEAN | Використовує Poisson/seamless blending для країв. |
+| `custom_mask` | MASK | Додаткова маска для replace/add/subtract режимів. |
+| `custom_mask_mode` | choice | Як комбінувати external mask: `replace`, `add`, `subtract`. |
+| `enable_debug` | BOOLEAN | Показує debug gallery і детальніший report. |
+
 Найкраще підходить для:
 - локальних правок одягу та аксесуарів
 - touchup обличчя
