@@ -75,11 +75,15 @@ function roundRect(ctx, x, y, w, h, r) {
     ctx.closePath();
 }
 
-function hideWidget(node, widget) {
+function hideWidget(node, widget, { preserveType = false } = {}) {
     if (!widget) return;
     if (!widget.origType) widget.origType = widget.type;
     const originalSerialize = widget.serializeValue?.bind(widget);
-    widget.type = "converted-widget";
+    // preserveType=true keeps the widget in widgets_values during workflow save.
+    // Use for hidden data widgets like slot_data that must survive reload.
+    if (!preserveType) {
+        widget.type = "converted-widget";
+    }
     widget.hidden = true;
     widget.computeSize = () => [0, -4];
     widget.draw = () => {};
@@ -1082,7 +1086,9 @@ app.registerExtension({
             node.addCustomWidget(uiWidget);
 
             setTimeout(() => {
-                hideWidget(node, W("slot_data"));
+                // slot_data must keep its original type so ComfyUI serializes
+                // it into widgets_values and restores it on workflow reload.
+                hideWidget(node, W("slot_data"), { preserveType: true });
                 hideWidget(node, W("auto_convert"));
                 refreshNodeSize();
                 node.setDirtyCanvas(true, true);

@@ -61,11 +61,13 @@ function roundRect(ctx, x, y, w, h, r) {
     ctx.closePath();
 }
 
-function hideWidget(node, widget) {
+function hideWidget(node, widget, { preserveType = false } = {}) {
     if (!widget) return;
     if (!widget.origType) widget.origType = widget.type;
     const originalSerialize = widget.serializeValue?.bind(widget);
-    widget.type = "converted-widget";
+    if (!preserveType) {
+        widget.type = "converted-widget";
+    }
     widget.hidden = true;
     widget.computeSize = () => [0, -4];
     widget.draw = () => {};
@@ -703,7 +705,7 @@ app.registerExtension({
                 hideWidget(node, W("safety"));
                 hideWidget(node, W("auto_normalize"));
                 hideWidget(node, W("auto_convert"));
-                hideWidget(node, W("slot_data"));
+                hideWidget(node, W("slot_data"), { preserveType: true });
                 refreshNodeSize();
                 node.setDirtyCanvas(true, true);
             }, 0);
