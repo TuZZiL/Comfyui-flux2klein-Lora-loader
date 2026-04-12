@@ -29,3 +29,15 @@
 - The preset mix dial now behaves intuitively: `0.0` is raw LoRA and `1.0` is full preset protection.
 - Loader tooltips, multi-slot labels, advisor output, and README examples were updated to match the new scale.
 - Targeted unit tests passed; full `unittest discover` is still blocked by missing optional `torch` and `numpy` dependencies in unrelated tests.
+
+## Companion Conditioning Docs
+
+- [x] Add a collapsible practical guide for the companion conditioning nodes in both README files.
+- [x] Expand each companion conditioning node with concrete usage guidance, starting values, and workflow notes.
+- [x] Keep the English and Ukrainian guides structurally aligned.
+
+## Summary
+
+- Both README files now include a collapsible practical guide for the companion conditioning nodes.
+- Each companion node now has a practical “what it changes / when to use / how to tune” section.
+- The English and Ukrainian docs were kept structurally aligned so they can be maintained together.

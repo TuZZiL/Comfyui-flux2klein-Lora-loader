@@ -211,7 +211,7 @@ The multi-slot advisor (`TUZ FLUX Multi Preflight Advisor`) accepts the same JSO
 
 ## Companion Conditioning Nodes
 
-These are **small corrective tools** that sit around your LoRA loader in the graph. They don't replace the loader — they refine how the reference image and text prompt interact.
+These are **small corrective tools** that sit around your LoRA loader in the graph. They do not replace the loader. They refine how the reference image and text prompt interact.
 
 **Base flow:**
 ```
@@ -222,63 +222,90 @@ companion nodes → conditioning/model
 sampler → decode → TUZ Klein Edit Composite
 ```
 
+<details>
+<summary><b>Practical guide (click to expand)</b></summary>
+
+### Which node to reach for
+
+| Problem | Use |
+|---|---|
+| Prompt is getting ignored by the reference | `Text/Ref Balance` |
+| Only one region should stay reference-true | `Mask Ref Controller` |
+| The whole reference is too rigid or too loose | `Ref Latent Controller` |
+| Colors drift while structure is fine | `Color Anchor` |
+
 ### Ref Latent Controller
 
-Controls how strongly one or all reference images influence the model's attention path.
+This changes how strongly reference tokens stay present in the attention path. It is the global “reference pressure” dial.
 
-**When to use:** The reference is too dominant or too weak in the output.
+Use it when the reference is too dominant, too weak, or too stiff overall.
 
-| Key parameter | What it does |
-|---|---|
-| `strength` | Overall reference influence (1.0 = normal, >1 = stronger, <1 = weaker) |
-| `reference_index` | Which reference to target (`-1` = all) |
-| `appearance_scale` | Boost coarse appearance (color, form) |
-| `detail_scale` | Dampen fine detail (textures, small features) |
+Starting values: `strength=1.0`, `appearance_scale=1.15`, `detail_scale=0.75`, `blur_radius=2`.
 
-**Starting values for "keep identity but reduce stiffness":**
-- `appearance_scale=1.15`, `detail_scale=0.75`, `blur_radius=2`
+How to tune:
+- Raise `strength` or `appearance_scale` if the prompt is overriding the reference too easily.
+- Lower `detail_scale` if the identity is correct but textures and micro-details feel locked in.
+- Use `reference_index=-1` when you want the same treatment on every reference latent.
+- Use `spatial_fade` when only part of the reference should stay stronger.
+
+Practical use: keep the same face or pose, but loosen the stiffness in clothing texture or fine detail.
 
 ### Text/Ref Balance
 
-Single slider to push prompt harder or pull reference harder.
+This shifts control between prompt and reference. `attn_patch` adjusts attention directly, while `latent_mix` weakens reference influence before sampling.
 
-**When to use:** Prompt changes aren't applying, or the reference is too dominant.
+Use it when the prompt is not landing or the reference keeps winning.
 
-| Key parameter | What it does |
-|---|---|
-| `balance` | 0.0 = reference stronger, 1.0 = text takes over |
-| `balance_mode` | `attn_patch` (gentle, default) or `latent_mix` (stronger intervention) |
+Starting values: `balance=0.45` for prompt-led edits, `balance=0.65` when the prompt needs more authority.
 
-**Rule of thumb:**
-- `attn_patch` for normal edits
-- `latent_mix` only when prompt consistently underfires
+How to tune:
+- Lower `balance` to keep the reference stronger.
+- Raise `balance` to let text take over more aggressively.
+- Keep `attn_patch` as the default.
+- Use `latent_mix` only when the prompt still underfires after attention patching.
+
+Practical use: make a stubborn reference listen to the prompt without removing the reference entirely.
 
 ### Mask Ref Controller
 
-Use a mask to protect, dampen, or replace regions of the reference latent.
+This applies a spatial mask to the reference latent. It does not localize the prompt. It localizes the reference influence.
 
-**When to use:** You want different reference strength in different image areas.
+Use it when one area should stay reference-true and another area should move.
 
-| Key parameter | What it does |
-|---|---|
-| `mask_action` | `scale` (dampen) or `mix` (replace with alternate signal) |
-| `replace_mode` | For `mix`: `zeros`, `gaussian_noise`, `channel_mean`, `lowpass_reference` |
-| `feather` | Smooth mask edges |
+Starting values: `mask_action=scale`, `strength=0.8`, `feather=12`.
 
-**Starting values:** `mask_action=scale`, `strength=0.8`, `feather=12`
+How to tune:
+- `scale` dampens the reference under the mask.
+- `mix` replaces masked regions with another latent signal.
+- `invert_mask=True` flips the protected and affected regions.
+- `reference_keep` matters only in `mix` mode.
+
+Practical use: protect the face while changing clothing or background, or invert the mask to push the edit into the subject itself.
 
 ### Color Anchor
 
-Keeps reference colors closer to the source during sampling.
+This applies color correction during sampling so the result stays closer to the source palette.
 
-**When to use:** Output colors drift too far from the reference.
+Use it when composition is right but the palette drifts.
 
-| Key parameter | What it does |
+Starting values: `strength=0.35`, `ramp_curve=1.5`, `channel_weights=uniform`.
+
+How to tune:
+- Raise `strength` if the output still drifts too far from the reference palette.
+- Raise `ramp_curve` if the correction kicks in too early and flattens the image.
+- Use `by_variance` when some channels are stable and others are noisy.
+
+Practical use: keep skin tones, clothing colors, or background hues closer to the reference without forcing a hard color match.
+
+### Common pairings
+
+| Goal | Pairing |
 |---|---|
-| `strength` | Color correction intensity (0.25–0.50 is a good start) |
-| `ramp_curve` | How quickly correction ramps in (higher = later start) |
-| `channel_weights` | `uniform` or `by_variance` (trusts stable channels more) |
-| `ref_index` | `-1` to average color from all references |
+| Region-specific identity control | `Ref Latent Controller` + `Mask Ref Controller` |
+| Prompt lands but colors drift | `Text/Ref Balance` + `Color Anchor` |
+| Only part of the frame should be rewritten | `Mask Ref Controller` + `Color Anchor` |
+
+</details>
 
 ---
 

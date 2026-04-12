@@ -211,7 +211,7 @@ Multi-версія (`TUZ FLUX Multi Preflight Advisor`) приймає той с
 
 ## Companion conditioning-ноди
 
-Це **невеликі коригуючі інструменти**, які сидять поруч з LoRA loader у графі. Вони не замінюють loader — вони уточнюють взаємодію reference image та prompt.
+Це **невеликі коригуючі інструменти**, які сидять поруч з LoRA loader у графі. Вони не замінюють loader. Вони уточнюють взаємодію reference image та prompt.
 
 **Базовий flow:**
 ```
@@ -222,63 +222,90 @@ companion nodes → conditioning/model
 sampler → decode → TUZ Klein Edit Composite
 ```
 
+<details>
+<summary><b>Практичний гайд (натисніть, щоб розгорнути)</b></summary>
+
+### Коли яку ноду брати
+
+| Проблема | Брати |
+|---|---|
+| Prompt ігнорується reference-ом | `Text/Ref Balance` |
+| Лише одна область має лишитися reference-правдою | `Mask Ref Controller` |
+| Увесь reference занадто жорсткий або занадто слабкий | `Ref Latent Controller` |
+| Кольори пливуть, але структура правильна | `Color Anchor` |
+
 ### Ref Latent Controller
 
-Керує тим, наскільки сильно reference image впливає на attention path моделі.
+Ця нода змінює, наскільки сильно reference tokens лишаються в attention path. Це глобальний діал “тиску reference”.
 
-**Коли потрібен:** Reference занадто домінує або занадто слабкий у результаті.
+Використовуйте її, коли reference надто домінує, надто слабкий або занадто жорсткий загалом.
 
-| Параметр | Що робить |
-|---|---|
-| `strength` | Загальний вплив reference (1.0 = норма, >1 = сильніше, <1 = слабше) |
-| `reference_index` | Який reference таргетити (`-1` = всі) |
-| `appearance_scale` | Підсилити coarse appearance (колір, форма) |
-| `detail_scale` | Послабити fine detail (текстури, дрібні елементи) |
+Стартові значення: `strength=1.0`, `appearance_scale=1.15`, `detail_scale=0.75`, `blur_radius=2`.
 
-**Для "зберегти identity, але зменшити жорсткість":**
-- `appearance_scale=1.15`, `detail_scale=0.75`, `blur_radius=2`
+Як крутити:
+- Піднімайте `strength` або `appearance_scale`, якщо prompt занадто легко перетискає reference.
+- Зменшуйте `detail_scale`, якщо identity правильна, але текстури й дрібні деталі занадто “заблоковані”.
+- Ставте `reference_index=-1`, коли треба однаково обробити всі reference latent.
+- Використовуйте `spatial_fade`, коли лише частина reference має лишатися сильнішою.
+
+Практичне застосування: зберегти обличчя або позу, але послабити жорсткість тканин чи дрібних деталей.
 
 ### Text/Ref Balance
 
-Один повзунок: дати prompt більше сили або міцніше притиснутися до reference.
+Ця нода зміщує контроль між prompt і reference. `attn_patch` змінює attention напряму, а `latent_mix` послаблює reference ще до семплінгу.
 
-**Коли потрібен:** Prompt зміни не проходять, або reference надто домінує.
+Використовуйте її, коли prompt не проходить або reference перемагає.
 
-| Параметр | Що робить |
-|---|---|
-| `balance` | 0.0 = reference сильніший, 1.0 = текст перезаписує агресивніше |
-| `balance_mode` | `attn_patch` (м'яко, default) або `latent_mix` (жорсткіше втручання) |
+Стартові значення: `balance=0.45` для prompt-led edit, `balance=0.65`, коли prompt має бути сильнішим.
 
-**Правило:**
-- `attn_patch` для більшості edit-сценаріїв
-- `latent_mix` тільки коли prompt стабільно недопрацьовує
+Як крутити:
+- Зменшуйте `balance`, щоб reference лишався сильнішим.
+- Збільшуйте `balance`, щоб text take over був агресивнішим.
+- `attn_patch` залишайте як default.
+- `latent_mix` використовуйте тільки коли prompt і далі недопрацьовує після attention patch.
+
+Практичне застосування: змусити впертий reference підкоритися prompt, не прибираючи reference повністю.
 
 ### Mask Ref Controller
 
-Маска для захисту, послаблення або заміни областей reference latent.
+Ця нода застосовує просторову маску до reference latent. Вона не локалізує prompt. Вона локалізує саме reference influence.
 
-**Коли потрібен:** Потрібна різна сила reference у різних частинах зображення.
+Використовуйте її, коли одна зона має лишатися reference-правдою, а інша має змінюватися.
 
-| Параметр | Що робить |
-|---|---|
-| `mask_action` | `scale` (послабити) або `mix` (замінити іншим сигналом) |
-| `replace_mode` | Для `mix`: `zeros`, `gaussian_noise`, `channel_mean`, `lowpass_reference` |
-| `feather` | Пом'якшити краї маски |
+Стартові значення: `mask_action=scale`, `strength=0.8`, `feather=12`.
 
-**Стартові значення:** `mask_action=scale`, `strength=0.8`, `feather=12`
+Як крутити:
+- `scale` послаблює reference під маскою.
+- `mix` замінює masked regions іншим latent-сигналом.
+- `invert_mask=True` міняє місцями захищену й змінену область.
+- `reference_keep` має значення лише в режимі `mix`.
+
+Практичне застосування: захистити обличчя і змінити одяг або фон, або інвертувати маску, щоб пушити edit у сам subject.
 
 ### Color Anchor
 
-Тримає кольори reference ближче до джерела під час семплінгу.
+Ця нода робить color correction під час семплінгу, щоб результат лишався ближчим до source palette.
 
-**Коли потрібен:** Кольори результату пливуть занадто далеко від reference.
+Використовуйте її, коли композиція правильна, але палітра пливе.
 
-| Параметр | Що робить |
+Стартові значення: `strength=0.35`, `ramp_curve=1.5`, `channel_weights=uniform`.
+
+Як крутити:
+- Піднімайте `strength`, якщо результат все ще надто відхиляється від reference palette.
+- Піднімайте `ramp_curve`, якщо корекція стартує занадто рано і робить картинку плоскою.
+- Використовуйте `by_variance`, коли частина каналів стабільна, а частина шумна.
+
+Практичне застосування: зберігати skin tones, кольори одягу або background hues ближчими до reference без жорсткого color match.
+
+### Типові зв'язки
+
+| Ціль | Пара |
 |---|---|
-| `strength` | Інтенсивність корекції (0.25–0.50 хороший старт) |
-| `ramp_curve` | Як швидко наростає корекція (більше = пізніший старт) |
-| `channel_weights` | `uniform` або `by_variance` (більше довіряє стабільним каналам) |
-| `ref_index` | `-1` для усереднення кольору з усіх reference |
+| Локальний контроль identity по області | `Ref Latent Controller` + `Mask Ref Controller` |
+| Prompt проходить, але кольори пливуть | `Text/Ref Balance` + `Color Anchor` |
+| Переписати треба лише частину кадру | `Mask Ref Controller` + `Color Anchor` |
+
+</details>
 
 ---
 
