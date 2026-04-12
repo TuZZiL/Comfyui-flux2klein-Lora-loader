@@ -21,7 +21,7 @@
 
 ## Можливості
 
-- **3 сфокусовані ноди**: Loader (одна LoRA + граф), Multi (динамічні слоти), Scheduled (темпоральний контроль)
+- **3 сфокусовані ноди + 1 advisor**: Loader (одна LoRA + граф), Multi (динамічні слоти), Scheduled (темпоральний контроль), Preflight Advisor (рекомендації перед запуском)
 - **Автовизначення формату**: Підтримка native, diffusers та Musubi Tuner (PEFT) LoRA
 - **Block-diagonal QKV fusion**: Коректне об'єднання окремих Q/K/V проєкцій у fused матриці
 - **Пресети редагування**: Збереження обличчя, тіла або стилю при редагуванні через LoRA
@@ -53,6 +53,22 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 Потребує `numpy` (зазвичай вже встановлено з ComfyUI).
 
 ## Ноди
+
+### TUZ FLUX Preflight Advisor
+
+Окрема advisory-нода для перевірки LoRA перед запуском. Вона аналізує файл LoRA та сумісність із ключами моделі і повертає рекомендації без зміни workflow.
+
+| Вихід | Тип | Опис |
+|---|---|---|
+| `report` | STRING | Людиночитаний підсумок із warnings і поясненням. |
+| `recommended_edit_mode` | STRING | Рекомендований preset захисту. |
+| `recommended_balance` | FLOAT | Рекомендований balance для preset'а. |
+| `recommended_strength` | FLOAT | Безпечний стартовий strength для LoRA. |
+| `compat_status` | STRING | `ok`, `partial` або `failed`. |
+| `matched_modules` | INT | Скільки модулів LoRA збіглося з моделлю. |
+| `total_modules` | INT | Загальна кількість повних модулів LoRA. |
+
+Multi-версія використовує ту саму JSON-структуру слотів, що й `TUZ FLUX LoRA Multi`, і повертає `recommended_slot_data_json`. Вона не аналізує і не рекомендує `schedule`.
 
 ### TUZ FLUX LoRA Loader
 

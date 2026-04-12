@@ -21,7 +21,7 @@ The result: your edits apply where you want them, and everything else stays unto
 
 ## Key Features
 
-- **3 focused nodes**: Loader (single LoRA + graph), Multi (dynamic slots), Scheduled (temporal control)
+- **3 focused nodes + 1 advisor**: Loader (single LoRA + graph), Multi (dynamic slots), Scheduled (temporal control), Preflight Advisor (pre-run recommendations)
 - **Format auto-detection**: Supports native, diffusers, and Musubi Tuner (PEFT) LoRA formats
 - **Block-diagonal QKV fusion**: Correctly maps separate Q/K/V projections to fused matrices
 - **Edit-mode presets**: Preserve face, body, or style during LoRA-based image editing
@@ -53,6 +53,22 @@ git clone https://github.com/TuZZiL/Comfyui-flux2klein-Lora-loader.git
 Requires `numpy` (usually already installed with ComfyUI).
 
 ## Nodes
+
+### TUZ FLUX Preflight Advisor
+
+Advisory node for pre-run LoRA inspection. It analyzes the LoRA file plus model key compatibility and returns recommendations without mutating the workflow.
+
+| Output | Type | Description |
+|---|---|---|
+| `report` | STRING | Human-readable summary with warnings and rationale. |
+| `recommended_edit_mode` | STRING | Suggested edit protection preset. |
+| `recommended_balance` | FLOAT | Suggested preset balance. |
+| `recommended_strength` | FLOAT | Safe starting strength for the LoRA. |
+| `compat_status` | STRING | `ok`, `partial`, or `failed`. |
+| `matched_modules` | INT | How many LoRA modules matched the model. |
+| `total_modules` | INT | Total complete LoRA modules found. |
+
+The multi-slot advisor uses the same slot JSON shape as `TUZ FLUX LoRA Multi` and returns `recommended_slot_data_json` for each active slot. It is advisory-only and does not inspect or recommend `schedule`.
 
 ### TUZ FLUX LoRA Loader
 
