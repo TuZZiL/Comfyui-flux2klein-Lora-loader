@@ -41,3 +41,16 @@
 - Both README files now include a collapsible practical guide for the companion conditioning nodes.
 - Each companion node now has a practical “what it changes / when to use / how to tune” section.
 - The English and Ukrainian docs were kept structurally aligned so they can be maintained together.
+
+## OPUS Brainstorm Brief
+
+- [ ] Hand the new companion conditioning brief to Opus and collect its markdown research output.
+- [ ] Review the ranked node ideas and extract the top candidates for implementation.
+- [ ] Decide which ideas should extend existing nodes versus become new nodes.
+
+## StructureLock
+
+- [x] Implement `StructureLock` as a sampler-adjacent companion node.
+- [x] Add shared sigma-progress and reference-selection helpers for reuse.
+- [x] Add unit tests for structure locking, masking, and no-op behavior.
+- [x] Update README docs in both languages with practical usage guidance.

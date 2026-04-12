@@ -126,6 +126,43 @@ def dampen_toward_neutral(value: float, neutral: float, preserve_original: float
     return neutral + (value - neutral) * (1.0 - preserve)
 
 
+def compute_sigma_progress(state: dict[str, Any], sigma: Any) -> tuple[float, float, float, float]:
+    try:
+        current_sigma = float(sigma.max().item())
+    except Exception:
+        current_sigma = float(sigma)
+
+    if state.get("sigma_max") is None or current_sigma > float(state.get("sigma_max", 0.0)):
+        state["sigma_max"] = current_sigma
+        state["step"] = 0
+
+    sigma_max = float(state.get("sigma_max") or 0.0)
+    if sigma_max > 1e-8:
+        sigma_progress = max(0.0, min(1.0, (sigma_max - current_sigma) / sigma_max))
+    else:
+        sigma_progress = 0.0
+
+    state["step"] = int(state.get("step", 0)) + 1
+    step_progress = 1.0 - 0.5 ** state["step"]
+    progress = max(sigma_progress, step_progress)
+    return current_sigma, sigma_progress, step_progress, progress
+
+
+def windowed_ramp(progress: float, start: float, end: float) -> float:
+    progress = float(max(0.0, min(1.0, progress)))
+    start = float(max(0.0, min(1.0, start)))
+    end = float(max(0.0, min(1.0, end)))
+    if end <= start:
+        return 1.0 if progress <= start else 0.0
+    if progress <= start:
+        return 1.0
+    if progress >= end:
+        return 0.0
+    t = (progress - start) / (end - start)
+    t = t * t * (3.0 - 2.0 * t)
+    return 1.0 - t
+
+
 def reference_indices(reference_count: int, reference_index: int) -> list[int]:
     if reference_count <= 0:
         return []
@@ -166,4 +203,19 @@ def reference_token_spans(extra_options: dict[str, Any], reference_index: int = 
     if reference_index >= len(spans):
         return []
     return [spans[int(reference_index)]]
+
+
+def select_reference_latent(refs: list[torch.Tensor], reference_index: int) -> Optional[torch.Tensor]:
+    if not refs:
+        return None
+    indices = reference_indices(len(refs), reference_index)
+    if not indices:
+        return None
+    if len(indices) == 1:
+        return refs[indices[0]]
+    try:
+        selected = [refs[i].to(torch.float32) for i in indices]
+        return torch.stack(selected, dim=0).mean(dim=0).to(dtype=refs[indices[0]].dtype)
+    except Exception:
+        return refs[indices[0]]
 

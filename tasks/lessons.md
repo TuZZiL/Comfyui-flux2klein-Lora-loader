@@ -6,3 +6,5 @@
 - Hidden state widgets like `slot_data` should preserve their original widget type when ComfyUI needs to serialize them into `widgets_values`; only purely decorative widgets should be converted to `converted-widget`.
 - When a user-facing dial is semantically inverted, flip the math, the tooltip, and the log language together. Renaming only the label leaves the UI misleading.
 - For companion conditioning docs, describe the actual surface being changed (`conditioning`, `model`, or `reference_latents`), then give starting values and a concrete workflow example. Parameter tables alone are not enough.
+- For LLM brainstorming briefs, pin the current baseline, the non-overlap constraints, the scoring rubric, and a few seed directions. Otherwise you get generic ideas that are hard to action.
+- For structure-preserving sampler hooks, keep the model narrow: low-pass blend, optional mask, and a time ramp are enough for v1. Extra controls are usually noise unless users ask for them.

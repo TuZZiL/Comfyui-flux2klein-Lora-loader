@@ -284,3 +284,57 @@ def rebalance_reference_appearance(
     detail = selected - lowpass
     result[:, ch_start:ch_end, :, :] = lowpass * float(appearance_scale) + detail * float(detail_scale)
     return result.to(dtype=ref.dtype)
+
+
+def apply_structure_lock(
+    denoised: torch.Tensor,
+    ref: torch.Tensor,
+    *,
+    strength: float,
+    blur_radius: int,
+    mask=None,
+    invert_mask: bool = False,
+    feather: int = 0,
+) -> torch.Tensor:
+    if denoised is None or ref is None:
+        return denoised
+    if denoised.ndim != 4:
+        raise ValueError(f"Expected [B, C, H, W] denoised latent, got shape {tuple(denoised.shape)}")
+    if ref.ndim != 4:
+        raise ValueError(f"Expected [B, C, H, W] reference latent, got shape {tuple(ref.shape)}")
+
+    preserve = float(max(0.0, min(1.0, strength)))
+    if preserve <= 0.0:
+        return denoised
+
+    working = denoised.to(dtype=torch.float32).clone()
+    ref_work = ref.to(dtype=torch.float32)
+    if ref_work.shape[0] != working.shape[0]:
+        ref_work = ref_work[:1].expand(working.shape[0], -1, -1, -1)
+    if ref_work.shape[-2:] != working.shape[-2:]:
+        ref_work = F.interpolate(ref_work, size=working.shape[-2:], mode="bilinear", align_corners=False)
+
+    ch_end = min(working.shape[1], ref_work.shape[1])
+    if ch_end <= 0:
+        return denoised
+
+    current = working[:, :ch_end, :, :]
+    reference = ref_work[:, :ch_end, :, :]
+    current_low = gaussian_blur_per_channel(current, blur_radius)
+    reference_low = gaussian_blur_per_channel(reference, blur_radius)
+    delta = reference_low - current_low
+
+    if mask is not None:
+        spatial_mask = _prepare_spatial_mask(
+            mask,
+            device=working.device,
+            lat_h=working.shape[-2],
+            lat_w=working.shape[-1],
+            invert_mask=invert_mask,
+            feather=feather,
+        )
+        delta = delta * spatial_mask.unsqueeze(0).unsqueeze(0)
+
+    result = working.clone()
+    result[:, :ch_end, :, :] = current + delta * preserve
+    return result.to(dtype=denoised.dtype)

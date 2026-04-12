@@ -10,11 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from conditioning_reference import apply_masked_reference_mix, mix_reference_latent, rebalance_reference_appearance  # noqa: E402
+from conditioning_reference import apply_masked_reference_mix, gaussian_blur_per_channel, mix_reference_latent, rebalance_reference_appearance  # noqa: E402
 from flux_conditioning_controls import (  # noqa: E402
     Flux2KleinColorAnchor,
     Flux2KleinMaskRefController,
     Flux2KleinRefLatentController,
+    Flux2KleinStructureLock,
     Flux2KleinTextRefBalance,
     _apply_mask_to_reference_latent,
     _reference_token_span,
@@ -289,6 +290,109 @@ class FluxConditioningControlsTests(unittest.TestCase):
         result = hooks[0]({"denoised": torch.zeros(1, 128, 2, 2), "sigma": torch.tensor(1.0)})
         self.assertGreater(float(result.mean().item()), 0.0)
         self.assertLess(float(result.mean().item()), 1.0)
+
+    def test_structure_lock_moves_low_frequency_toward_reference(self):
+        node = Flux2KleinStructureLock()
+        model = FakeModel()
+        ref = torch.tensor(
+            [
+                [
+                    [
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.5, 0.5, 1.5, 1.5],
+                        [0.5, 0.5, 1.5, 1.5],
+                    ],
+                    [
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.5, 0.5, 1.5, 1.5],
+                        [0.5, 0.5, 1.5, 1.5],
+                    ],
+                    [
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.5, 0.5, 1.5, 1.5],
+                        [0.5, 0.5, 1.5, 1.5],
+                    ],
+                    [
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.0, 0.0, 1.0, 1.0],
+                        [0.5, 0.5, 1.5, 1.5],
+                        [0.5, 0.5, 1.5, 1.5],
+                    ],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        conditioning = [(
+            torch.zeros(1, 8, 4),
+            {"reference_latents": [ref.clone()]},
+        )]
+
+        model_out, _ = node.apply(
+            model,
+            conditioning,
+            strength=1.0,
+            blur_radius=1,
+            ramp_start=0.0,
+            ramp_end=1.0,
+        )
+
+        hooks = model_out.model_options.get("sampler_post_cfg_function", [])
+        self.assertEqual(len(hooks), 1)
+
+        denoised = torch.zeros_like(ref)
+        result = hooks[0]({"denoised": denoised, "sigma": torch.tensor(1.0)})
+        ref_low = gaussian_blur_per_channel(ref, 1)
+        result_low = gaussian_blur_per_channel(result, 1)
+        zero_low = gaussian_blur_per_channel(denoised, 1)
+
+        ref_dist = torch.mean(torch.abs(result_low - ref_low)).item()
+        zero_dist = torch.mean(torch.abs(zero_low - ref_low)).item()
+        self.assertLess(ref_dist, zero_dist)
+
+    def test_structure_lock_respects_mask_and_invert_mask(self):
+        node = Flux2KleinStructureLock()
+        model = FakeModel()
+        ref = torch.ones(1, 4, 4, 4)
+        conditioning = [(
+            torch.zeros(1, 8, 4),
+            {"reference_latents": [ref.clone()]},
+        )]
+        mask = torch.tensor([[[1.0, 1.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0]]])
+
+        model_out, _ = node.apply(
+            model,
+            conditioning,
+            strength=1.0,
+            blur_radius=1,
+            ramp_start=0.0,
+            ramp_end=1.0,
+            mask=mask,
+            invert_mask=False,
+        )
+        hook = model_out.model_options["sampler_post_cfg_function"][0]
+        result = hook({"denoised": torch.zeros_like(ref), "sigma": torch.tensor(1.0)})
+        left = result[:, :, :, :2].abs().mean().item()
+        right = result[:, :, :, 2:].abs().mean().item()
+        self.assertGreater(left, right)
+
+        model_out_inv, _ = node.apply(
+            model,
+            conditioning,
+            strength=1.0,
+            blur_radius=1,
+            ramp_start=0.0,
+            ramp_end=1.0,
+            mask=mask,
+            invert_mask=True,
+        )
+        hook_inv = model_out_inv.model_options["sampler_post_cfg_function"][0]
+        result_inv = hook_inv({"denoised": torch.zeros_like(ref), "sigma": torch.tensor(1.0)})
+        left_inv = result_inv[:, :, :, :2].abs().mean().item()
+        right_inv = result_inv[:, :, :, 2:].abs().mean().item()
+        self.assertLess(left_inv, right_inv)
 
 
 if __name__ == "__main__":

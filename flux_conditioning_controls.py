@@ -12,15 +12,19 @@ import torch
 try:  # pragma: no cover - package vs direct import
     from .conditioning_common import (
         apply_preserve_blend,
+        compute_sigma_progress,
         clone_meta,
         dampen_toward_neutral,
         get_reference_latents,
         reference_indices,
         reference_token_spans,
+        select_reference_latent,
         set_reference_latents,
+        windowed_ramp,
     )
     from .conditioning_reference import (
         apply_mask_to_reference_latent as _apply_mask_to_reference_latent_impl,
+        apply_structure_lock,
         apply_masked_reference_mix,
         mix_reference_latent,
         rebalance_reference_appearance,
@@ -28,15 +32,19 @@ try:  # pragma: no cover - package vs direct import
 except ImportError:  # pragma: no cover
     from conditioning_common import (
         apply_preserve_blend,
+        compute_sigma_progress,
         clone_meta,
         dampen_toward_neutral,
         get_reference_latents,
         reference_indices,
         reference_token_spans,
+        select_reference_latent,
         set_reference_latents,
+        windowed_ramp,
     )
     from conditioning_reference import (
         apply_mask_to_reference_latent as _apply_mask_to_reference_latent_impl,
+        apply_structure_lock,
         apply_masked_reference_mix,
         mix_reference_latent,
         rebalance_reference_appearance,
@@ -557,14 +565,9 @@ class Flux2KleinColorAnchor:
             refs = _extract_reference_latents(meta)
             if not refs:
                 continue
-            indices = reference_indices(len(refs), ref_index)
-            if not indices:
+            ref_latent = select_reference_latent(refs, ref_index)
+            if ref_latent is None:
                 continue
-            try:
-                selected = [refs[i].to(torch.float32) for i in indices]
-                ref_latent = torch.stack(selected, dim=0).mean(dim=0).to(dtype=refs[indices[0]].dtype)
-            except Exception:
-                ref_latent = refs[indices[0]]
             break
         if ref_latent is None:
             if debug:
@@ -589,21 +592,7 @@ class Flux2KleinColorAnchor:
             denoised = args["denoised"]
             sigma = args["sigma"]
 
-            try:
-                s = sigma.max().item()
-            except Exception:
-                s = float(sigma)
-
-            if state["sigma_max"] is None or s > state["sigma_max"]:
-                state["sigma_max"] = s
-                state["step"] = 0
-
-            sigma_max = state["sigma_max"]
-            sigma_progress = max(0.0, min(1.0, (sigma_max - s) / sigma_max if sigma_max > 1e-6 else 0.0))
-
-            state["step"] += 1
-            step_progress = 1.0 - 0.5 ** state["step"]
-            progress = max(sigma_progress, step_progress)
+            s, sigma_progress, step_progress, progress = compute_sigma_progress(state, sigma)
             effective = strength * (progress ** (1.0 / curve))
 
             if effective < 1e-5:
@@ -635,11 +624,136 @@ class Flux2KleinColorAnchor:
         return (current,)
 
 
+class Flux2KleinStructureLock:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "conditioning": ("CONDITIONING",),
+                "strength": ("FLOAT", {
+                    "default": 0.35, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "How strongly to restore the reference's coarse spatial structure during sampling.",
+                }),
+                "reference_index": ("INT", {
+                    "default": 0, "min": -1, "max": 63, "step": 1,
+                    "tooltip": "Which reference to target. Use -1 to affect all references instead of only one.",
+                }),
+                "blur_radius": ("INT", {
+                    "default": 6, "min": 1, "max": 32, "step": 1,
+                    "tooltip": "Blur radius used to define what counts as structure versus detail.",
+                }),
+                "ramp_start": ("FLOAT", {
+                    "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "When structure locking should start to fade in denoising progress.",
+                }),
+                "ramp_end": ("FLOAT", {
+                    "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05,
+                    "tooltip": "When structure locking should stop acting. Earlier end = more freedom later in sampling.",
+                }),
+            },
+            "optional": {
+                "mask": ("MASK", {
+                    "tooltip": "Optional region mask. Use it when only part of the image should keep its structure locked.",
+                }),
+                "invert_mask": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Invert the mask so the untouched area becomes the affected area.",
+                }),
+                "feather": ("INT", {
+                    "default": 0, "min": 0, "max": 64, "step": 1,
+                    "tooltip": "Softens the mask edge before applying the structure lock.",
+                }),
+                "debug": ("BOOLEAN", {"default": False}),
+            },
+        }
+
+    RETURN_TYPES = ("MODEL", "CONDITIONING")
+    RETURN_NAMES = ("model", "conditioning")
+    FUNCTION = "apply"
+    CATEGORY = "conditioning/flux2klein"
+
+    def apply(
+        self,
+        model,
+        conditioning,
+        strength=0.35,
+        reference_index=0,
+        blur_radius=6,
+        ramp_start=0.0,
+        ramp_end=0.5,
+        mask=None,
+        invert_mask=False,
+        feather=0,
+        debug=False,
+    ):
+        if not conditioning or strength == 0.0:
+            return (model, conditioning)
+
+        if ramp_end < ramp_start:
+            ramp_start, ramp_end = ramp_end, ramp_start
+
+        ref_latent = None
+        for _, meta in _iter_conditioning_meta(conditioning):
+            refs = _extract_reference_latents(meta)
+            if not refs:
+                continue
+            ref_latent = select_reference_latent(refs, reference_index)
+            if ref_latent is not None:
+                break
+
+        if ref_latent is None:
+            if debug:
+                print("[StructureLock] No reference latent found in conditioning; node inactive.")
+            return (model, conditioning)
+
+        state = {
+            "sigma_max": None,
+            "step": 0,
+            "last_sigma_logged": None,
+        }
+        current = model.clone()
+
+        def structure_lock_fn(args):
+            denoised = args["denoised"]
+            sigma = args["sigma"]
+
+            sigma_value, sigma_progress, step_progress, progress = compute_sigma_progress(state, sigma)
+            effective = float(max(0.0, min(1.0, strength))) * windowed_ramp(sigma_progress, ramp_start, ramp_end)
+            if effective <= 1e-5:
+                return denoised
+
+            locked = apply_structure_lock(
+                denoised,
+                ref_latent,
+                strength=effective,
+                blur_radius=int(blur_radius),
+                mask=mask,
+                invert_mask=invert_mask,
+                feather=int(feather),
+            )
+
+            if debug and sigma_value != state["last_sigma_logged"]:
+                state["last_sigma_logged"] = sigma_value
+                print(
+                    f"[StructureLock] step={state['step']} sigma={sigma_value:.4f} "
+                    f"sigma_prog={sigma_progress:.3f} step_prog={step_progress:.3f} "
+                    f"progress={progress:.3f} effective={effective:.3f} blur_radius={int(blur_radius)} "
+                    f"masked={'yes' if mask is not None else 'no'}"
+                )
+
+            return locked
+
+        current.model_options.setdefault("sampler_post_cfg_function", []).append(structure_lock_fn)
+        return (current, conditioning)
+
+
 NODE_CLASS_MAPPINGS = {
     "Flux2KleinRefLatentController": Flux2KleinRefLatentController,
     "Flux2KleinTextRefBalance": Flux2KleinTextRefBalance,
     "Flux2KleinMaskRefController": Flux2KleinMaskRefController,
     "Flux2KleinColorAnchor": Flux2KleinColorAnchor,
+    "Flux2KleinStructureLock": Flux2KleinStructureLock,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -647,4 +761,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Flux2KleinTextRefBalance": "TUZ FLUX.2 Klein Text/Ref Balance",
     "Flux2KleinMaskRefController": "TUZ FLUX.2 Klein Mask Ref Controller",
     "Flux2KleinColorAnchor": "TUZ FLUX.2 Klein Color Anchor",
+    "Flux2KleinStructureLock": "TUZ FLUX.2 Klein Structure Lock",
 }

@@ -232,6 +232,7 @@ sampler → decode → TUZ Klein Edit Composite
 | Prompt is getting ignored by the reference | `Text/Ref Balance` |
 | Only one region should stay reference-true | `Mask Ref Controller` |
 | The whole reference is too rigid or too loose | `Ref Latent Controller` |
+| Composition or pose keeps drifting | `Structure Lock` |
 | Colors drift while structure is fine | `Color Anchor` |
 
 ### Ref Latent Controller
@@ -281,6 +282,23 @@ How to tune:
 - `reference_keep` matters only in `mix` mode.
 
 Practical use: protect the face while changing clothing or background, or invert the mask to push the edit into the subject itself.
+
+### Structure Lock
+
+This keeps coarse spatial structure from the reference while still letting prompts change texture and detail.
+
+Use it when pose, framing, or object placement keeps drifting during edits.
+
+Starting values: `strength=0.35`, `blur_radius=6`, `ramp_start=0.0`, `ramp_end=0.5`.
+
+How to tune:
+- Raise `strength` if the composition still drifts too much.
+- Raise `blur_radius` if the lock feels too sticky and starts freezing detail.
+- Shorten `ramp_end` if you want the structure hold to fade out earlier in sampling.
+- Use `reference_index=-1` when multiple references should share the same lock.
+- Add a mask when only the face, subject, or background should stay anchored.
+
+Practical use: keep portrait poses stable, preserve product framing, or hold the subject in place while swapping a background.
 
 ### Color Anchor
 
