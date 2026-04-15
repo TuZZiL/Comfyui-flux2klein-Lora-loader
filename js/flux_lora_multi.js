@@ -15,7 +15,7 @@ const HEADER_H = 48;
 const TOOLBAR_H = 28;
 const HINT_H = 20;
 const CARD_SUMMARY_H = 68;
-const CARD_EXPANDED_H = 176;
+const CARD_EXPANDED_H = 256;
 const EMPTY_H = 70;
 const ROW_GAP = 8;
 const CARD_GAP = 8;
@@ -23,6 +23,20 @@ const RADIUS = 8;
 
 const STRENGTH_RANGE = { min: -5.0, max: 5.0, step: 0.05, precision: 2 };
 const BALANCE_RANGE = { min: 0.0, max: 1.0, step: 0.05, precision: 2 };
+const ANATOMY_STRENGTH_RANGE = { min: 0.0, max: 1.0, step: 0.05, precision: 2 };
+const DEFAULT_ANATOMY_PROFILES = [
+    "None",
+    "Balanced Identity",
+    "Undress Safe",
+    "Undress Body Lock",
+    "Cloth Swap Flexible",
+    "Robot Frame Lock",
+    "Armor Hard Surface",
+    "Anime Stylized Lock",
+    "Texture Only",
+    "Prompt Freedom",
+    "Custom",
+];
 
 const THEME = {
     canvas: "#151515",
@@ -58,6 +72,8 @@ const BADGES = {
 
 let _loraListCache = null;
 let _loraListPromise = null;
+let _anatomyProfilesCache = null;
+let _anatomyProfilesPromise = null;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
@@ -175,6 +191,14 @@ function shortLoraName(name) {
 
 function activeSlotCount(slots) {
     return slots.filter((slot) => slot.enabled && slot.lora !== "None").length;
+}
+
+function anatomySummary(slot, short = false) {
+    const profile = slot?.anatomy_profile || "None";
+    if (profile === "None") return short ? "Anat none" : "Anatomy: None";
+    const strict = slot?.anatomy_strict_zero ? " strict" : "";
+    const base = `${profile} ${Number(slot?.anatomy_strength ?? 0.65).toFixed(2)}${strict}`;
+    return short ? `Anat ${base}` : `Anatomy: ${base}`;
 }
 
 function badgeForMode(mode) {
@@ -431,6 +455,30 @@ async function getLoraList() {
     return _loraListPromise;
 }
 
+async function getAnatomyProfiles() {
+    if (_anatomyProfilesCache) return _anatomyProfilesCache;
+    if (_anatomyProfilesPromise) return _anatomyProfilesPromise;
+
+    _anatomyProfilesPromise = (async () => {
+        try {
+            const resp = await api.fetchApi("/object_info/FluxLoraLoader");
+            const data = await resp.json();
+            const values = data?.FluxLoraLoader?.input?.optional?.anatomy_profile?.[0];
+            if (Array.isArray(values) && values.length) {
+                _anatomyProfilesCache = values;
+                return _anatomyProfilesCache;
+            }
+        } catch (e) {
+            console.warn("[FluxLoraMulti] Failed to fetch anatomy profiles:", e);
+        }
+
+        _anatomyProfilesCache = [...DEFAULT_ANATOMY_PROFILES];
+        return _anatomyProfilesCache;
+    })();
+
+    return _anatomyProfilesPromise;
+}
+
 app.registerExtension({
     name: "Comfy.FluxLoraMulti",
 
@@ -445,7 +493,9 @@ app.registerExtension({
             const W = (name) => node.widgets?.find((widget) => widget.name === name);
 
             node._slots = parseSlotData(W("slot_data")?.value);
-            node._loraList = await getLoraList();
+            const [loraList, anatomyProfiles] = await Promise.all([getLoraList(), getAnatomyProfiles()]);
+            node._loraList = loraList;
+            node._anatomyProfiles = anatomyProfiles;
             node._multiState = {
                 viewMode: "compact",
                 bounds: {
@@ -466,8 +516,35 @@ app.registerExtension({
                 node.setSize([currentWidth, computedHeight]);
             }
 
+            function ensureProperties() {
+                if (!node.properties) node.properties = {};
+                return node.properties;
+            }
+
+            function persistSlotData(raw) {
+                ensureProperties().slot_data_json = raw;
+            }
+
+            function readSlotDataWithFallback(config) {
+                const widgetRaw = W("slot_data")?.value;
+                if (typeof widgetRaw === "string" && widgetRaw.trim() && widgetRaw.trim() !== "[]") {
+                    return widgetRaw;
+                }
+                const configRaw = config?.properties?.slot_data_json;
+                if (typeof configRaw === "string" && configRaw.trim()) {
+                    return configRaw;
+                }
+                const nodeRaw = node.properties?.slot_data_json;
+                if (typeof nodeRaw === "string" && nodeRaw.trim()) {
+                    return nodeRaw;
+                }
+                return "[]";
+            }
+
             function syncSlotData() {
-                updateWidgetValue(W("slot_data"), serializeSlots(node._slots));
+                const raw = serializeSlots(node._slots);
+                persistSlotData(raw);
+                updateWidgetValue(W("slot_data"), raw);
             }
 
             function markDirty() {
@@ -592,6 +669,20 @@ app.registerExtension({
 
             function openEditModeSelector(index, event) {
                 openSelector(index, "edit_mode", EDIT_MODES, event);
+            }
+
+            function openAnatomyProfileSelector(index, event) {
+                const values = node._anatomyProfiles?.length ? node._anatomyProfiles : DEFAULT_ANATOMY_PROFILES;
+                openSelector(index, "anatomy_profile", values, event);
+            }
+
+            function openAnatomyCustomEditor(index) {
+                const slot = node._slots[index];
+                if (!slot) return;
+                const seed = slot.anatomy_custom_json || "{}";
+                const next = window.prompt("Custom anatomy profile JSON", seed);
+                if (next === null) return;
+                updateSlot(index, { anatomy_custom_json: String(next) });
             }
 
             function computeCardHeight(slot) {
@@ -728,6 +819,8 @@ app.registerExtension({
                 ctx.font = "500 10px sans-serif";
                 ctx.fillText(slot.use_case, card.x + 16, metaY);
                 ctx.fillText(`Prot ${slot.balance.toFixed(2)}`, card.x + 74, metaY);
+                const anatomyText = fitText(ctx, anatomySummary(slot, true), card.w - 230);
+                ctx.fillText(anatomyText, card.x + 138, metaY);
 
                 return {
                     card,
@@ -780,7 +873,10 @@ app.registerExtension({
                 drawCardField(ctx, useCaseRect, "Use case", slot.use_case);
                 drawCardField(ctx, modeRect, "Edit mode", badge.label);
 
-                const balanceLabelY = card.y + 102;
+                const anatomyRect = { x: innerX, y: card.y + 98, w: innerW, h: 26 };
+                drawCardField(ctx, anatomyRect, "Anatomy profile", fitText(ctx, slot.anatomy_profile || "None", innerW - 34));
+
+                const balanceLabelY = card.y + 134;
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px sans-serif";
                 ctx.fillText("Protection", innerX, balanceLabelY);
@@ -790,7 +886,7 @@ app.registerExtension({
                 const balanceRect = { x: innerX, y: balanceLabelY + 4, w: innerW, h: 14 };
                 drawBalanceBar(ctx, balanceRect, slot.balance, true);
 
-                const strengthLabelY = card.y + 128;
+                const strengthLabelY = card.y + 158;
                 ctx.fillStyle = THEME.textSoft;
                 ctx.font = "500 10px sans-serif";
                 ctx.fillText("Strength", innerX, strengthLabelY);
@@ -799,6 +895,42 @@ app.registerExtension({
                 ctx.textAlign = "left";
                 const strengthRect = { x: innerX, y: strengthLabelY + 4, w: innerW, h: 14 };
                 drawStrengthBar(ctx, strengthRect, slot.strength, true);
+
+                const anatomyStrengthLabelY = card.y + 182;
+                ctx.fillStyle = THEME.textSoft;
+                ctx.font = "500 10px sans-serif";
+                ctx.fillText("Anatomy strength", innerX, anatomyStrengthLabelY);
+                ctx.textAlign = "right";
+                ctx.fillText(slot.anatomy_strength.toFixed(2), innerX + innerW, anatomyStrengthLabelY);
+                ctx.textAlign = "left";
+                const anatomyStrengthRect = { x: innerX, y: anatomyStrengthLabelY + 4, w: innerW, h: 14 };
+                drawBalanceBar(ctx, anatomyStrengthRect, slot.anatomy_strength, true);
+
+                const strictRect = { x: innerX, y: card.y + 206, w: halfW, h: 22 };
+                roundRect(ctx, strictRect.x, strictRect.y, strictRect.w, strictRect.h, 6);
+                ctx.fillStyle = THEME.surface2;
+                ctx.fill();
+                ctx.strokeStyle = THEME.border;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.fillStyle = THEME.textMuted;
+                ctx.font = "500 10px sans-serif";
+                ctx.textBaseline = "middle";
+                ctx.fillText("Strict zero", strictRect.x + 10, strictRect.y + strictRect.h / 2 + 0.5);
+                ctx.textBaseline = "alphabetic";
+                drawToggle(
+                    ctx,
+                    { x: strictRect.x + strictRect.w - 40, y: strictRect.y + 3, w: 30, h: 16 },
+                    !!slot.anatomy_strict_zero
+                );
+
+                const customRect = { x: innerX + halfW + halfGap, y: card.y + 206, w: halfW, h: 22 };
+                drawCardField(
+                    ctx,
+                    customRect,
+                    "Custom JSON",
+                    slot.anatomy_profile === "Custom" ? "Edit..." : "Only for Custom"
+                );
 
                 const actionY = card.y + card.h - 26;
                 const actionRects = {
@@ -820,8 +952,12 @@ app.registerExtension({
                     lora: loraRect,
                     useCase: useCaseRect,
                     editMode: modeRect,
+                    anatomyProfile: anatomyRect,
                     balance: balanceRect,
                     strength: strengthRect,
+                    anatomyStrength: anatomyStrengthRect,
+                    anatomyStrict: strictRect,
+                    anatomyCustom: customRect,
                     actions: actionRects,
                 };
             }
@@ -1051,12 +1187,30 @@ app.registerExtension({
                         openEditModeSelector(index, event);
                         return true;
                     }
+                    if (pointInRect(mx, my, bounds.anatomyProfile)) {
+                        openAnatomyProfileSelector(index, event);
+                        return true;
+                    }
                     if (pointInRect(mx, my, bounds.balance)) {
                         startSlider(index, "balance", bounds.balance, BALANCE_RANGE, mx);
                         return true;
                     }
                     if (pointInRect(mx, my, bounds.strength)) {
                         startSlider(index, "strength", bounds.strength, STRENGTH_RANGE, mx);
+                        return true;
+                    }
+                    if (pointInRect(mx, my, bounds.anatomyStrength)) {
+                        startSlider(index, "anatomy_strength", bounds.anatomyStrength, ANATOMY_STRENGTH_RANGE, mx);
+                        return true;
+                    }
+                    if (pointInRect(mx, my, bounds.anatomyStrict)) {
+                        updateSlot(index, { anatomy_strict_zero: !slot.anatomy_strict_zero });
+                        return true;
+                    }
+                    if (pointInRect(mx, my, bounds.anatomyCustom)) {
+                        if (slot.anatomy_profile === "Custom") {
+                            openAnatomyCustomEditor(index);
+                        }
                         return true;
                     }
                     if (pointInRect(mx, my, bounds.actions?.duplicate)) {
@@ -1128,10 +1282,28 @@ app.registerExtension({
             node.onConfigure = function (config) {
                 origConfigure?.(config);
                 setTimeout(async () => {
-                    if (!node._loraList) node._loraList = await getLoraList();
-                    node._slots = parseSlotData(W("slot_data")?.value);
+                    if (!node._loraList || !node._anatomyProfiles) {
+                        const [loraList, anatomyProfiles] = await Promise.all([getLoraList(), getAnatomyProfiles()]);
+                        node._loraList = loraList;
+                        node._anatomyProfiles = anatomyProfiles;
+                    }
+                    // Fallback path: when another ComfyUI install drops hidden widget
+                    // values, we recover from node.properties.
+                    const restoredRaw = readSlotDataWithFallback(config);
+                    updateWidgetValue(W("slot_data"), restoredRaw);
+                    persistSlotData(restoredRaw);
+                    node._slots = parseSlotData(restoredRaw);
                     markDirty();
                 }, 50);
+            };
+
+            const origSerialize = node.onSerialize?.bind(node);
+            node.onSerialize = function (output) {
+                origSerialize?.(output);
+                const raw = serializeSlots(node._slots || []);
+                output.properties = output.properties || {};
+                output.properties.slot_data_json = raw;
+                persistSlotData(raw);
             };
 
             if (node.size[0] < MIN_WIDTH) node.size[0] = MIN_WIDTH;
