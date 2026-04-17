@@ -62,6 +62,20 @@ const THEME = {
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+function ellipsize(ctx, text, maxWidth) {
+    const safe = String(text ?? "");
+    if (!safe || ctx.measureText(safe).width <= maxWidth) return safe;
+    const suffix = "...";
+    const suffixW = ctx.measureText(suffix).width;
+    let out = "";
+    for (const ch of safe) {
+        const candidate = out + ch;
+        if (ctx.measureText(candidate).width + suffixW > maxWidth) break;
+        out = candidate;
+    }
+    return out ? `${out}${suffix}` : suffix;
+}
+
 function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -145,8 +159,25 @@ app.registerExtension({
             node.setDirtyCanvas(true, true);
         }
 
+        function decisionHandler(event) {
+            const detail = event?.detail ?? {};
+            const node = findNodeByExecutionId(detail.node);
+            if (!node) return;
+            const protection = Number(detail.protection ?? 0.0);
+            const tune = Number(detail.auto_tune ?? 0.0);
+            node._fluxAutoDecision = {
+                preset: String(detail.preset ?? "None"),
+                protection: Number.isFinite(protection) ? protection : 0.0,
+                reason: String(detail.reason_label ?? detail.reason_code ?? "auto"),
+                auto_bias: String(detail.auto_bias ?? "Neutral"),
+                auto_tune: Number.isFinite(tune) ? tune : 0.0,
+            };
+            node.setDirtyCanvas(true, true);
+        }
+
         app.api.addEventListener("flux_lora.auto_strength", messageHandler);
         app.api.addEventListener("flux_lora.compat_report", compatHandler);
+        app.api.addEventListener("flux_lora.auto_decision", decisionHandler);
     },
 
     async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -170,6 +201,7 @@ app.registerExtension({
             let strengths = defaultStrengths();
             let graphPresets = parseGraphPresets(W("graph_presets")?.value);
             node._fluxCompatReport = null;
+            node._fluxAutoDecision = null;
 
             // Last non-zero trackers for toggle
             const lastDb = {};
@@ -602,6 +634,7 @@ app.registerExtension({
                     }
 
                     const compat = node._fluxCompatReport;
+                    let compatRight = gX + 2;
                     if (compat) {
                         const badgeText = `Compat ${compat.matched_modules}/${compat.total_modules}`;
                         const badgeY = lY + LABEL_H + 3;
@@ -628,6 +661,31 @@ app.registerExtension({
                         ctx.fillStyle = text;
                         ctx.font = "bold 9px monospace";
                         ctx.fillText(badgeText, badgeX + 8, badgeY + 10);
+                        compatRight = badgeX + badgeW + 8;
+                    }
+
+                    const autoDecision = node._fluxAutoDecision;
+                    if (autoDecision) {
+                        const autoY = lY + LABEL_H + 3;
+                        const maxAutoW = gX + gW - 2 - compatRight;
+                        if (maxAutoW >= 130) {
+                            const autoPrefix = `Auto ${autoDecision.preset} ${autoDecision.protection.toFixed(2)}`;
+                            const autoDetail = `${autoPrefix} | ${autoDecision.reason}`;
+                            ctx.font = "bold 9px monospace";
+                            const label = ellipsize(ctx, autoDetail, maxAutoW - 16);
+                            const autoW = Math.max(120, Math.min(maxAutoW, ctx.measureText(label).width + 16));
+                            const autoX = gX + gW - autoW - 2;
+                            if (autoX >= compatRight) {
+                                roundRect(ctx, autoX, autoY, autoW, BADGE_H - 4, 4);
+                                ctx.fillStyle = "#122033";
+                                ctx.fill();
+                                ctx.strokeStyle = "#2d5f92";
+                                ctx.lineWidth = 1;
+                                ctx.stroke();
+                                ctx.fillStyle = "#9fceff";
+                                ctx.fillText(label, autoX + 8, autoY + 10);
+                            }
+                        }
                     }
                 },
 

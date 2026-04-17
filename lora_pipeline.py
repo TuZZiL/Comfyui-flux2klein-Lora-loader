@@ -379,34 +379,110 @@ def send_compatibility_report(node_id, report, applied_modules=None):
         logger.exception("[FLUX LoRA] Failed to send compatibility report to UI")
 
 
-def resolve_edit_mode(edit_mode, balance, lora_path, node_label="FLUX LoRA", use_case="Edit"):
+def send_auto_decision(node_id, decision):
+    if node_id is None or not isinstance(decision, dict):
+        return
+    if decision.get("mode") != "auto":
+        return
+    try:
+        from server import PromptServer
+
+        PromptServer.instance.send_sync(
+            "flux_lora.auto_decision",
+            {
+                "node": str(node_id),
+                "preset": str(decision.get("preset", "None")),
+                "protection": float(decision.get("protection", 0.0)),
+                "base_protection": float(decision.get("base_protection", 0.0)),
+                "reason_code": str(decision.get("reason_code", "unknown")),
+                "reason_label": str(decision.get("reason_label", "unknown")),
+                "auto_bias": str(decision.get("auto_bias", "Neutral")),
+                "auto_tune": float(decision.get("auto_tune", 0.0)),
+                "use_case": str(decision.get("use_case", "Edit")),
+            },
+        )
+    except Exception:
+        logger.exception("[FLUX LoRA] Failed to send auto decision report to UI")
+
+
+def resolve_edit_mode(
+    edit_mode,
+    balance,
+    lora_path,
+    node_label="FLUX LoRA",
+    use_case="Edit",
+    auto_bias="Neutral",
+    auto_tune=0.0,
+    return_decision=False,
+):
+    def out(cfg, decision):
+        if return_decision:
+            return cfg, decision
+        return cfg
+
     if edit_mode == "None":
-        return None
+        return out(None, None)
     if edit_mode == "Auto":
         try:
             from .lora_meta import analyse_for_node
         except ImportError:  # pragma: no cover
             from lora_meta import analyse_for_node
         analysis = analyse_for_node(lora_path)
-        auto_preset, auto_balance = resolve_preset_selection(
-            edit_mode, balance, analysis=analysis, use_case=use_case
+        auto_preset, auto_balance, auto_meta = resolve_preset_selection(
+            edit_mode,
+            balance,
+            analysis=analysis,
+            use_case=use_case,
+            auto_bias=auto_bias,
+            auto_tune=auto_tune,
+            return_meta=True,
+        )
+        decision = {
+            "mode": "auto",
+            "preset": auto_preset,
+            "protection": float(auto_balance),
+            "base_protection": float(auto_meta.get("base_protection", auto_balance)),
+            "reason_code": str(auto_meta.get("reason_code", "unknown")),
+            "reason_label": str(auto_meta.get("reason_label", "unknown")),
+            "auto_bias": str(auto_meta.get("auto_bias", "Neutral")),
+            "auto_tune": float(auto_meta.get("auto_tune", 0.0)),
+            "use_case": str(auto_meta.get("use_case", use_case)),
+        }
+        logger.info(
+            f"[{node_label}] Auto({use_case}) -> {auto_preset} "
+            f"(protection={auto_balance:.2f}, bias={decision['auto_bias']}, "
+            f"tune={decision['auto_tune']:+.2f}, reason={decision['reason_label']})"
         )
         if auto_preset == "None":
-            logger.info(f"[{node_label}] Auto({use_case}) -> None (raw LoRA is enough)")
-            return None
+            return out(None, decision)
         preset_raw = EDIT_PRESETS.get(auto_preset)
         if preset_raw is not None:
             cfg = interpolate_preset(preset_raw, auto_balance)
-            logger.info(f"[{node_label}] Auto({use_case}) -> {auto_preset} (protection={auto_balance:.2f})")
-            return cfg
-        return None
-    preset_name, resolved_balance = resolve_preset_selection(edit_mode, balance, use_case=use_case)
+            return out(cfg, decision)
+        return out(None, decision)
+    preset_name, resolved_balance, manual_meta = resolve_preset_selection(
+        edit_mode,
+        balance,
+        use_case=use_case,
+        return_meta=True,
+    )
     preset_raw = EDIT_PRESETS.get(preset_name)
     if preset_raw is not None:
         cfg = interpolate_preset(preset_raw, resolved_balance)
         logger.info(f"[{node_label}] Edit mode '{preset_name}' applied (protection={resolved_balance:.2f})")
-        return cfg
-    return None
+        decision = {
+            "mode": "manual",
+            "preset": preset_name,
+            "protection": float(resolved_balance),
+            "base_protection": float(manual_meta.get("base_protection", resolved_balance)),
+            "reason_code": str(manual_meta.get("reason_code", "manual_selection")),
+            "reason_label": str(manual_meta.get("reason_label", "manual selection")),
+            "auto_bias": "Neutral",
+            "auto_tune": 0.0,
+            "use_case": str(manual_meta.get("use_case", use_case)),
+        }
+        return out(cfg, decision)
+    return out(None, None)
 
 
 def _all_norms(analysis):
@@ -473,6 +549,8 @@ def prepare_patch_data(
     auto_strength=False,
     node_label="FLUX LoRA",
     node_id=None,
+    auto_bias="Neutral",
+    auto_tune=0.0,
 ):
     if strength == 0:
         return None
@@ -502,7 +580,17 @@ def prepare_patch_data(
             except Exception:
                 logger.exception(f"[{node_label}] Failed to send auto-strength update to UI")
 
-    edit_preset_cfg = resolve_edit_mode(edit_mode, balance, lora_path, node_label, use_case=use_case)
+    edit_preset_cfg, edit_decision = resolve_edit_mode(
+        edit_mode,
+        balance,
+        lora_path,
+        node_label,
+        use_case=use_case,
+        auto_bias=auto_bias,
+        auto_tune=auto_tune,
+        return_decision=True,
+    )
+    send_auto_decision(node_id, edit_decision)
     try:
         anatomy_profile_cfg = resolve_anatomy_profile(
             anatomy_profile,
@@ -541,6 +629,7 @@ def prepare_patch_data(
         "lora_path": lora_path,
         "strength": strength,
         "layer_cfg": layer_cfg,
+        "edit_decision": edit_decision,
     }
 
 
@@ -560,6 +649,8 @@ def load_and_patch(
     auto_strength=False,
     node_label="FLUX LoRA",
     node_id=None,
+    auto_bias="Neutral",
+    auto_tune=0.0,
 ):
     prepared = prepare_patch_data(
         model,
@@ -577,6 +668,8 @@ def load_and_patch(
         auto_strength=auto_strength,
         node_label=node_label,
         node_id=node_id,
+        auto_bias=auto_bias,
+        auto_tune=auto_tune,
     )
     if prepared is None:
         return model

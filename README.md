@@ -82,6 +82,8 @@ These are the terms you will see most often. If you only remember one thing, kee
 | `edit_mode` | Chooses the protection style. `Auto` is the safest first choice. |
 | `protection` | How strong the chosen preset should be. Legacy `balance` still works for old workflows. |
 | `use_case` | Tells `Auto` whether you are editing a reference image or generating freely. |
+| `auto_bias` | Auto-only bias. Conservative = safer, Aggressive = freer, Neutral = current default behavior. |
+| `auto_tune` | Auto-only fine adjustment (-0.15 to +0.15) on top of Auto's protection choice. |
 | `auto_convert` | Converts many downloaded FLUX LoRAs into the format Klein expects. Leave it on unless you know the file is already native. |
 | `auto_strength` | Automatically spreads strength across layers. Useful later, not required for the first test. |
 | `anatomy_profile` | Extra body-preservation preset for clothing or body edits. Leave it off until you need it. |
@@ -154,6 +156,14 @@ Only affects **Auto** mode:
 
 Manual presets always behave exactly as selected, regardless of `use_case`.
 
+### Auto Bias + Tune (`auto_bias`, `auto_tune`)
+
+Only affects **Auto** mode:
+
+- `auto_bias=Conservative` nudges Auto toward stronger protection.
+- `auto_bias=Aggressive` nudges Auto toward freer LoRA behavior.
+- `auto_tune` is a small final offset after Auto picks a preset/protection.
+
 ---
 
 ## Detailed Node Reference
@@ -171,6 +181,8 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 | `auto_convert` | boolean | Convert diffusers-format LoRAs to native FLUX format |
 | `auto_strength` | boolean | Auto-compute per-layer strengths from ΔW analysis |
 | `edit_mode` | dropdown | Protection level — `Auto` is the recommended start |
+| `auto_bias` | dropdown | Auto-only bias (`Conservative`, `Neutral`, `Aggressive`) |
+| `auto_tune` | float | Auto-only fine tune added after Auto picks protection (-0.15 to +0.15) |
 | `protection` | float | Protection dial: 0.0 = raw LoRA, 1.0 = full preset protection (`balance` is still accepted as legacy input) |
 | `anatomy_profile` | dropdown | Opt-in body-preservation profile for clothing / body edits |
 | `anatomy_strength` | float | How strongly the anatomy profile should protect structure |
@@ -182,6 +194,8 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 - Click to toggle a bar on/off
 
 **Auto-strength:** Analyzes the LoRA's weight tensors and auto-fills optimal per-layer strengths. You can still manually tweak afterwards.
+
+**Auto decision badge:** When `edit_mode=Auto`, the graph widget shows `Auto <Preset> <Protection> | <Reason>` after analysis.
 
 **Anatomy Shield:** Use this when a LoRA keeps changing the body shape while you only want the clothes or surface details to move.
 - `Undress Safe` is the default starting point for clothing removal.

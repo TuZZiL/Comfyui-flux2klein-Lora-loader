@@ -49,6 +49,7 @@ import folder_paths
 import logging
 
 from .edit_presets import (
+    AUTO_BIAS_NAMES,
     PRESET_NAMES,
     USE_CASE_NAMES,
     build_graph_presets,
@@ -126,6 +127,17 @@ class FluxLoraLoader:
                     "default": "None",
                     "tooltip": "How protective the loader should be. Auto is the safest starting point. 'None' here means Raw / No Protection, not an unselected value.",
                 }),
+                "auto_bias": (AUTO_BIAS_NAMES, {
+                    "default": "Neutral",
+                    "tooltip": "Auto-only. Conservative adds protection, Aggressive relaxes it. Neutral keeps current Auto behavior.",
+                }),
+                "auto_tune": ("FLOAT", {
+                    "default": 0.0,
+                    "min": -0.15,
+                    "max": 0.15,
+                    "step": 0.05,
+                    "tooltip": "Auto-only fine tune added after Auto decision. Positive = safer, negative = freer.",
+                }),
                 "protection": ("FLOAT", {
                     "default": 0.5,
                     "min": 0.0,
@@ -172,7 +184,7 @@ class FluxLoraLoader:
 
     def load_lora(self, model, lora_name, strength, use_case="Edit",
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
-                  edit_mode="None", protection=0.5,
+                  edit_mode="None", auto_bias="Neutral", auto_tune=0.0, protection=0.5,
                   anatomy_profile="None", anatomy_strength=0.65,
                   anatomy_strict_zero=False, anatomy_custom_json="",
                   graph_presets=None, node_id=None, balance=None):
@@ -191,6 +203,7 @@ class FluxLoraLoader:
             model, lora_name, strength, auto_convert, edit_mode, protection,
             anatomy_profile, anatomy_strength, anatomy_strict_zero, anatomy_custom_json, use_case,
             layer_cfg=layer_cfg, auto_strength=auto_strength,
+            auto_bias=auto_bias, auto_tune=auto_tune,
             node_label="FLUX LoRA Loader", node_id=node_id,
         )
         return (model_out,)

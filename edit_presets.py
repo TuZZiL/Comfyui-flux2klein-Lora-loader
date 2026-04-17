@@ -21,12 +21,34 @@ Values are multipliers relative to global_strength:
   1.0 = full LoRA effect, 0.3 = 30% effect, 1.15 = 115% (boosted)
 """
 
+import math
+
 try:  # pragma: no cover - package vs direct import
     from .flux_constants import N_DOUBLE, N_SINGLE
 except ImportError:  # pragma: no cover
     from flux_constants import N_DOUBLE, N_SINGLE
 
 USE_CASE_NAMES = ["Edit", "Generate"]
+AUTO_BIAS_NAMES = ["Conservative", "Neutral", "Aggressive"]
+AUTO_BIAS_DELTAS = {
+    "Conservative": 0.10,
+    "Neutral": 0.00,
+    "Aggressive": -0.10,
+}
+AUTO_REASON_LABELS = {
+    "fallback_empty": "no analysis data",
+    "fallback_zero": "flat analysis data",
+    "image_heavy": "image stream dominant",
+    "late_heavy_generate": "late blocks dominant",
+    "uniform_generate_none": "uniform coverage",
+    "default_generate_none": "default generate policy",
+    "late_heavy_edit": "late blocks dominant",
+    "late_mid_edit": "late/mid blocks elevated",
+    "image_heavy_style": "image stream dominant",
+    "uniform_edit_face": "uniform full coverage",
+    "db_soft_none": "soft structural profile",
+    "default_edit_face": "default edit policy",
+}
 GRAPH_PRESET_MAP = {
     "face": "Preserve Face",
     "body": "Preserve Body",
@@ -144,6 +166,30 @@ EDIT_PRESETS = {
 PRESET_NAMES = list(EDIT_PRESETS.keys()) + ["Auto"]
 
 
+def _clamp01(value):
+    return max(0.0, min(1.0, float(value)))
+
+
+def _snap_005(value):
+    return round(round(float(value) / 0.05) * 0.05, 2)
+
+
+def _coerce_auto_bias(auto_bias):
+    if auto_bias in AUTO_BIAS_DELTAS:
+        return auto_bias
+    return "Neutral"
+
+
+def _coerce_auto_tune(auto_tune):
+    try:
+        value = float(auto_tune)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(value):
+        return 0.0
+    return max(-0.15, min(0.15, value))
+
+
 def build_graph_presets():
     """Return the graph button presets derived from the canonical edit presets."""
     graph_presets = {}
@@ -219,7 +265,7 @@ def merge_preset_over(base_cfg, preset_cfg):
     return merged
 
 
-def auto_select_preset(analysis, use_case="Edit"):
+def auto_select_preset(analysis, use_case="Edit", auto_bias="Neutral", auto_tune=0.0, return_meta=False):
     """
     Analyze ΔW norms from lora_meta.analyse_for_node() and pick the best
     preset + protection automatically.
@@ -243,9 +289,31 @@ def auto_select_preset(analysis, use_case="Edit"):
       - Higher concentration = higher protection
 
     Returns: (preset_name: str, protection: float)
+    If return_meta=True, also returns decision metadata for UI/logging.
     """
     def mean_or_zero(values):
         return (sum(values) / len(values)) if values else 0.0
+
+    bias_name = _coerce_auto_bias(auto_bias)
+    tune_value = _coerce_auto_tune(auto_tune)
+    bias_delta = AUTO_BIAS_DELTAS[bias_name]
+
+    def finalize(preset_name, base_protection, reason_code, metrics=None):
+        final_protection = _snap_005(_clamp01(float(base_protection) + bias_delta + tune_value))
+        if not return_meta:
+            return (preset_name, final_protection)
+        meta = {
+            "use_case": use_case,
+            "reason_code": reason_code,
+            "reason_label": AUTO_REASON_LABELS.get(reason_code, reason_code),
+            "auto_bias": bias_name,
+            "auto_tune": tune_value,
+            "bias_delta": bias_delta,
+            "base_protection": round(float(base_protection), 2),
+            "protection": final_protection,
+            "metrics": metrics or {},
+        }
+        return (preset_name, final_protection, meta)
 
     db_norms = []
     db_img = []
@@ -281,11 +349,11 @@ def auto_select_preset(analysis, use_case="Edit"):
         use_case = "Edit"
 
     if not all_norms:
-        return ("Preserve Face", 0.60)
+        return finalize("Preserve Face", 0.60, "fallback_empty")
 
     mean_all = sum(all_norms) / len(all_norms)
     if mean_all < 1e-8:
-        return ("Preserve Face", 0.60)
+        return finalize("Preserve Face", 0.60, "fallback_zero")
 
     max_all = max(all_norms)
     late_mean = mean_or_zero(sb_late)
@@ -300,30 +368,41 @@ def auto_select_preset(analysis, use_case="Edit"):
     max_ratio = max_all / mean_all
     img_txt_ratio = (img_mean / txt_mean) if txt_mean > 1e-8 else 1.0
     coverage_ratio = active_components / float(N_DOUBLE * 2 + N_SINGLE)
+    reason_code = "default_edit_face"
 
     # Pick preset
     if use_case == "Generate":
         if img_txt_ratio > 1.22 and late_ratio < 1.02 and mid_ratio < 1.05:
             preset = "Style Only"
+            reason_code = "image_heavy"
         elif late_ratio > 1.35 or (late_ratio > 1.22 and max_ratio > 1.40):
             preset = "Preserve Face"
+            reason_code = "late_heavy_generate"
         elif coverage_ratio > 0.85 or (db_ratio > 0.82 and late_ratio < 1.05):
             preset = "None"
+            reason_code = "uniform_generate_none"
         else:
             preset = "None"
+            reason_code = "default_generate_none"
     else:
         if late_ratio > 1.30 or (late_ratio > 1.20 and max_ratio > 1.35):
             preset = "Preserve Body"
+            reason_code = "late_heavy_edit"
         elif late_ratio > 1.08 or mid_ratio > 1.05:
             preset = "Preserve Face"
+            reason_code = "late_mid_edit"
         elif img_txt_ratio > 1.18 and late_ratio < 1.00 and mid_ratio < 1.02:
             preset = "Style Only"
+            reason_code = "image_heavy_style"
         elif coverage_ratio > 0.85:
             preset = "Preserve Face"
+            reason_code = "uniform_edit_face"
         elif db_ratio > 0.85 and late_ratio < 0.95 and max_ratio < 1.12:
             preset = "None"
+            reason_code = "db_soft_none"
         else:
             preset = "Preserve Face"
+            reason_code = "default_edit_face"
 
     # Pick protection from concentration: stronger profile concentration → higher protection.
     # max_ratio 1.0–1.2 → protection ~0.45 (mild)
@@ -336,17 +415,59 @@ def auto_select_preset(analysis, use_case="Edit"):
     elif preset == "Style Only":
         raw_mix = max(raw_mix, 0.35)
     raw_mix = round(raw_mix / 0.05) * 0.05  # snap to 0.05 grid
-    protection = round(1.0 - raw_mix, 2)
+    base_protection = round(1.0 - raw_mix, 2)
+    metrics = {
+        "late_ratio": round(float(late_ratio), 4),
+        "mid_ratio": round(float(mid_ratio), 4),
+        "db_ratio": round(float(db_ratio), 4),
+        "max_ratio": round(float(max_ratio), 4),
+        "img_txt_ratio": round(float(img_txt_ratio), 4),
+        "coverage_ratio": round(float(coverage_ratio), 4),
+    }
+    return finalize(preset, base_protection, reason_code, metrics=metrics)
 
-    return (preset, protection)
 
-
-def resolve_preset_selection(edit_mode, balance, analysis=None, use_case="Edit"):
+def resolve_preset_selection(
+    edit_mode,
+    balance,
+    analysis=None,
+    use_case="Edit",
+    auto_bias="Neutral",
+    auto_tune=0.0,
+    return_meta=False,
+):
     """
     Resolve a user-facing edit_mode into the preset name + protection to apply.
 
     Manual modes ignore use_case; only Auto is use-case aware.
     """
     if edit_mode == "Auto":
-        return auto_select_preset(analysis or {}, use_case=use_case)
-    return (edit_mode, balance)
+        return auto_select_preset(
+            analysis or {},
+            use_case=use_case,
+            auto_bias=auto_bias,
+            auto_tune=auto_tune,
+            return_meta=return_meta,
+        )
+    if not return_meta:
+        return (edit_mode, balance)
+    manual_balance = 0.5
+    try:
+        manual_balance = float(balance)
+    except (TypeError, ValueError):
+        pass
+    return (
+        edit_mode,
+        manual_balance,
+        {
+            "use_case": use_case if use_case in USE_CASE_NAMES else "Edit",
+            "reason_code": "manual_selection",
+            "reason_label": "manual selection",
+            "auto_bias": "Neutral",
+            "auto_tune": 0.0,
+            "bias_delta": 0.0,
+            "base_protection": round(manual_balance, 2),
+            "protection": round(manual_balance, 2),
+            "metrics": {},
+        },
+    )

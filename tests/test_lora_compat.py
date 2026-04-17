@@ -221,11 +221,81 @@ class LoraCompatTests(unittest.TestCase):
         )
         self.assertEqual(preset, "Preserve Face")
 
+    def test_auto_bias_neutral_keeps_previous_auto_outcome(self):
+        analysis = self.make_analysis()
+        preset_base, protection_base = auto_select_preset(analysis, use_case="Edit")
+        preset_neutral, protection_neutral = auto_select_preset(
+            analysis,
+            use_case="Edit",
+            auto_bias="Neutral",
+            auto_tune=0.0,
+        )
+        self.assertEqual(preset_base, preset_neutral)
+        self.assertEqual(protection_base, protection_neutral)
+
+    def test_auto_bias_and_tune_shift_protection(self):
+        analysis = self.make_analysis()
+        preset_base, protection_base = auto_select_preset(analysis, use_case="Edit", auto_bias="Neutral")
+        preset_conservative, protection_conservative = auto_select_preset(
+            analysis,
+            use_case="Edit",
+            auto_bias="Conservative",
+        )
+        preset_aggressive, protection_aggressive = auto_select_preset(
+            analysis,
+            use_case="Edit",
+            auto_bias="Aggressive",
+        )
+        preset_tuned, protection_tuned = auto_select_preset(
+            analysis,
+            use_case="Edit",
+            auto_bias="Neutral",
+            auto_tune=0.10,
+        )
+        self.assertEqual(preset_base, preset_conservative)
+        self.assertEqual(preset_base, preset_aggressive)
+        self.assertEqual(preset_base, preset_tuned)
+        self.assertEqual(protection_conservative, min(1.0, round(protection_base + 0.10, 2)))
+        self.assertEqual(protection_aggressive, max(0.0, round(protection_base - 0.10, 2)))
+        self.assertEqual(protection_tuned, min(1.0, round(protection_base + 0.10, 2)))
+
+    def test_auto_select_invalid_bias_or_tune_falls_back_to_neutral(self):
+        analysis = self.make_analysis()
+        _, neutral = auto_select_preset(analysis, use_case="Edit", auto_bias="Neutral", auto_tune=0.0)
+        _, invalid = auto_select_preset(analysis, use_case="Edit", auto_bias="Unknown", auto_tune=float("nan"))
+        self.assertEqual(neutral, invalid)
+
+    def test_auto_select_return_meta_contains_reason_and_protection(self):
+        preset, protection, meta = auto_select_preset(
+            self.make_analysis(),
+            use_case="Edit",
+            auto_bias="Neutral",
+            auto_tune=0.0,
+            return_meta=True,
+        )
+        self.assertEqual(meta["protection"], protection)
+        self.assertEqual(meta["use_case"], "Edit")
+        self.assertEqual(meta["auto_bias"], "Neutral")
+        self.assertIn("reason_code", meta)
+        self.assertIsInstance(meta["reason_label"], str)
+        self.assertEqual(meta["metrics"]["coverage_ratio"], 1.0)
+        self.assertEqual(preset, "Preserve Face")
+
     def test_manual_preset_resolution_ignores_use_case(self):
         preset_edit = resolve_preset_selection("Style Only", 0.35, use_case="Edit")
         preset_generate = resolve_preset_selection("Style Only", 0.35, use_case="Generate")
         self.assertEqual(preset_edit, ("Style Only", 0.35))
         self.assertEqual(preset_generate, ("Style Only", 0.35))
+
+    def test_manual_preset_resolution_ignores_auto_bias_and_tune(self):
+        preset = resolve_preset_selection(
+            "Style Only",
+            0.35,
+            use_case="Edit",
+            auto_bias="Conservative",
+            auto_tune=0.15,
+        )
+        self.assertEqual(preset, ("Style Only", 0.35))
 
 
 if __name__ == "__main__":

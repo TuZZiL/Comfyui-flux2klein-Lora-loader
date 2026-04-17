@@ -82,6 +82,8 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 | `edit_mode` | Вибирає стиль захисту. `Auto` - найбезпечніший старт. |
 | `protection` | Наскільки сильним має бути вибраний пресет. Legacy `balance` ще працює для старих workflow. |
 | `use_case` | Пояснює `Auto`, чи ви редагуєте референсне зображення, чи генеруєте вільно. |
+| `auto_bias` | Лише для Auto. Conservative = безпечніше, Aggressive = вільніше, Neutral = поточна дефолтна поведінка. |
+| `auto_tune` | Лише для Auto. Тонке зміщення (-0.15 до +0.15) поверх auto-вибору protection. |
 | `auto_convert` | Конвертує багато завантажених FLUX LoRA у формат, який очікує Klein. Залишайте увімкненим, якщо не знаєте, що файл уже native. |
 | `auto_strength` | Автоматично розподіляє силу між шарами. Корисно пізніше, не обов'язково для першого тесту. |
 | `anatomy_profile` | Додатковий профіль збереження тіла для редагування одягу або тіла. Залишайте вимкненим, доки він не знадобиться. |
@@ -154,6 +156,14 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 
 Ручні пресети завжди працюють рівно так, як ви їх обрали, незалежно від `use_case`.
 
+### Auto Bias + Tune (`auto_bias`, `auto_tune`)
+
+Впливає лише на **Auto** режим:
+
+- `auto_bias=Conservative` зсуває Auto до сильнішого захисту.
+- `auto_bias=Aggressive` зсуває Auto до вільнішої поведінки LoRA.
+- `auto_tune` дає мале фінальне зміщення після auto-вибору пресету/захисту.
+
 ---
 
 ## Детальний довідник нод
@@ -171,6 +181,8 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 | `auto_convert` | boolean | Конвертувати diffusers-формат у нативний FLUX |
 | `auto_strength` | boolean | Авто-обчислення per-layer strength з ΔW аналізу |
 | `edit_mode` | dropdown | Рівень захисту — `Auto` рекомендований старт |
+| `auto_bias` | dropdown | Лише для Auto: (`Conservative`, `Neutral`, `Aggressive`) |
+| `auto_tune` | float | Лише для Auto: тонке зміщення після вибору protection (-0.15 до +0.15) |
 | `protection` | float | Діал захисту: 0.0 = "сира" LoRA, 1.0 = повний захист пресету (`balance` все ще приймається для сумісності) |
 | `anatomy_profile` | dropdown | Opt-in профіль збереження тіла для clothing / body edit |
 | `anatomy_strength` | float | Наскільки сильно anatomy profile має захищати структуру |
@@ -182,6 +194,8 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 - Клік перемикає бар вкл/викл
 
 **Auto-strength:** Аналізує тензори ваг LoRA і автоматично заповнює оптимальні per-layer strengths. Після цього ви все ще можете вручну підправити.
+
+**Auto badge у графі:** коли `edit_mode=Auto`, віджет показує `Auto <Preset> <Protection> | <Reason>` після аналізу.
 
 **Anatomy Shield:** Використовуйте, коли LoRA постійно змінює форму тіла, а вам треба рухати лише одяг або поверхневі деталі.
 - `Undress Safe` - стартовий профіль для зняття одягу.
