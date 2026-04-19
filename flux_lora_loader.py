@@ -137,7 +137,7 @@ class FluxLoraLoader:
                 }),
                 "edit_mode": (PRESET_NAMES, {
                     "default": RAW_PRESET_NAME,
-                    "tooltip": "How protective the loader should be. Auto is the safest starting point. Raw means no extra protection.",
+                    "tooltip": "Semantic / identity protection mode. Use it to control how strongly the LoRA can overwrite the subject, face, and prompt-driven meaning. Auto is the safest starting point. Raw means no extra edit-mode protection.",
                 }),
                 "protection": ("FLOAT", {
                     "default": 0.5,
@@ -148,20 +148,20 @@ class FluxLoraLoader:
                 }),
                 "anatomy_profile": (ANATOMY_PROFILE_NAMES, {
                     "default": "None",
-                    "tooltip": "Intent-based body preservation profile. Use it when a clothing or body LoRA changes anatomy more than you want.",
+                    "tooltip": "Optional body / silhouette preservation overlay. Use it when a clothing or body LoRA changes anatomy more than you want. This stacks on top of edit_mode rather than replacing it.",
                 }),
                 "anatomy_strength": ("FLOAT", {
                     "default": 0.65,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
-                    "tooltip": "How strongly the selected anatomy profile should protect structure. 0.0 = disabled, 1.0 = full profile effect.",
+                    "tooltip": "How strongly the selected anatomy profile should protect body structure. 0.0 = disabled, 1.0 = full anatomy-profile effect.",
                 }),
                 "anatomy_strict_zero": ("BOOLEAN", {
                     "default": False,
                     "label_on": "Strict zero blocks",
                     "label_off": "Soft anatomy shield",
-                    "tooltip": "Advanced. Hard-disables the most sensitive blocks listed by the active anatomy profile.",
+                    "tooltip": "Advanced. Applies the profile's strongest block suppression on top of anatomy_strength for the sensitive blocks listed by the active anatomy profile.",
                 }),
                 "anatomy_custom_json": ("STRING", {
                     "default": "",

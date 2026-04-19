@@ -15,7 +15,7 @@ const HEADER_H = 48;
 const TOOLBAR_H = 28;
 const HINT_H = 20;
 const CARD_SUMMARY_H = 68;
-const CARD_EXPANDED_H = 256;
+const CARD_EXPANDED_H = 286;
 const EMPTY_H = 70;
 const ROW_GAP = 8;
 const CARD_GAP = 8;
@@ -153,6 +153,7 @@ function normalizeSlot(initial) {
         anatomy_strict_zero: initial?.anatomy_strict_zero ?? false,
         anatomy_custom_json: initial?.anatomy_custom_json ?? "",
         collapsed: initial?.collapsed ?? true,
+        advisor_hint: initial?.advisor_hint ?? null,
     };
 }
 
@@ -228,6 +229,22 @@ function updateWidgetValue(widget, value) {
     if (!widget) return;
     widget.value = value;
     widget.callback?.(value);
+}
+
+async function fetchLoaderHint(loraName, useCase) {
+    const response = await api.fetchApi("/tuz_flux/loader_hint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            lora_name: loraName,
+            use_case: useCase,
+        }),
+    });
+    const payload = await response.json();
+    return {
+        ok: response.ok,
+        payload,
+    };
 }
 
 function pointInRect(x, y, rect) {
@@ -579,7 +596,13 @@ app.registerExtension({
 
             function updateSlot(index, patch) {
                 if (index < 0 || index >= node._slots.length) return;
-                node._slots[index] = normalizeSlot({ ...node._slots[index], ...patch });
+                const resetHint = Object.prototype.hasOwnProperty.call(patch, "lora")
+                    || Object.prototype.hasOwnProperty.call(patch, "use_case");
+                node._slots[index] = normalizeSlot({
+                    ...node._slots[index],
+                    ...(resetHint ? { advisor_hint: null } : {}),
+                    ...patch,
+                });
                 syncSlotData();
                 markDirty();
             }
@@ -702,6 +725,45 @@ app.registerExtension({
                 const next = window.prompt("Custom anatomy profile JSON", seed);
                 if (next === null) return;
                 updateSlot(index, { anatomy_custom_json: String(next) });
+            }
+
+            async function requestSlotHint(index) {
+                const slot = node._slots[index];
+                if (!slot) return;
+                if (!slot.lora || slot.lora === "None") {
+                    updateSlot(index, {
+                        advisor_hint: { status: "error", verdict: "Select a LoRA first", apply: null },
+                    });
+                    return;
+                }
+                updateSlot(index, {
+                    advisor_hint: { status: "loading", verdict: "", apply: null },
+                });
+                try {
+                    const { ok, payload } = await fetchLoaderHint(slot.lora, slot.use_case);
+                    updateSlot(index, {
+                        advisor_hint: {
+                            status: ok ? "ready" : "error",
+                            verdict: String(payload?.verdict ?? "Analyze failed"),
+                            apply: payload?.apply ?? null,
+                        },
+                    });
+                } catch (error) {
+                    console.warn("[FluxLoraMulti] Failed to fetch slot hint:", error);
+                    updateSlot(index, {
+                        advisor_hint: { status: "error", verdict: "Analyze failed", apply: null },
+                    });
+                }
+            }
+
+            function applySlotHint(index) {
+                const slot = node._slots[index];
+                const apply = slot?.advisor_hint?.apply;
+                if (!slot || !apply) return;
+                updateSlot(index, {
+                    edit_mode: String(apply.edit_mode ?? "Raw"),
+                    protection: typeof apply.protection === "number" ? Number(apply.protection) : slot.protection,
+                });
             }
 
             function computeCardHeight(slot) {
@@ -953,12 +1015,31 @@ app.registerExtension({
                     slot.anatomy_profile === "Custom" ? "Edit..." : "Only for Custom"
                 );
 
+                const hintRect = { x: innerX, y: card.y + 234, w: innerW, h: 18 };
+                const slotHint = slot.advisor_hint;
+                roundRect(ctx, hintRect.x, hintRect.y, hintRect.w, hintRect.h, 6);
+                ctx.fillStyle = slotHint?.status === "error" ? "#2a1a1a" : THEME.surface2;
+                ctx.fill();
+                ctx.strokeStyle = slotHint?.status === "error" ? "#5a2a2a" : THEME.border;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.fillStyle = slotHint?.status === "error" ? "#ffb0b0" : THEME.textMuted;
+                ctx.font = "500 10px sans-serif";
+                const hintLabel = slotHint?.status === "loading"
+                    ? "Analyzing LoRA..."
+                    : (slotHint?.verdict || "Analyze this slot for a quick edit-mode suggestion");
+                ctx.fillText(fitText(ctx, hintLabel, hintRect.w - 16), hintRect.x + 8, hintRect.y + 12);
+
                 const actionY = card.y + card.h - 24;
                 const actionRects = {
-                    duplicate: { x: innerX, y: actionY, w: 72, h: 18 },
-                    toggle: { x: innerX + 80, y: actionY, w: 72, h: 18 },
-                    remove: { x: innerX + 160, y: actionY, w: 64, h: 18 },
+                    analyze: { x: innerX, y: actionY, w: 64, h: 18 },
+                    apply: { x: innerX + 72, y: actionY, w: 54, h: 18 },
+                    duplicate: { x: innerX + 134, y: actionY, w: 72, h: 18 },
+                    toggle: { x: innerX + 214, y: actionY, w: 72, h: 18 },
+                    remove: { x: innerX + 294, y: actionY, w: 64, h: 18 },
                 };
+                drawActionPill(ctx, actionRects.analyze, slotHint?.status === "loading" ? "Wait..." : "Analyze");
+                drawActionPill(ctx, actionRects.apply, "Apply", slotHint?.apply ? "success" : "neutral");
                 drawActionPill(ctx, actionRects.duplicate, "Duplicate");
                 drawActionPill(ctx, actionRects.toggle, slot.enabled ? "Disable" : "Enable", slot.enabled ? "neutral" : "success");
                 drawActionPill(ctx, actionRects.remove, "Remove", "danger");
@@ -979,6 +1060,7 @@ app.registerExtension({
                     anatomyStrength: anatomyStrengthRect,
                     anatomyStrict: strictRect,
                     anatomyCustom: customRect,
+                    hint: hintRect,
                     actions: actionRects,
                 };
             }
@@ -1236,6 +1318,14 @@ app.registerExtension({
                     }
                     if (pointInRect(mx, my, bounds.actions?.duplicate)) {
                         duplicateSlot(index);
+                        return true;
+                    }
+                    if (pointInRect(mx, my, bounds.actions?.analyze)) {
+                        requestSlotHint(index);
+                        return true;
+                    }
+                    if (pointInRect(mx, my, bounds.actions?.apply)) {
+                        applySlotHint(index);
                         return true;
                     }
                     if (pointInRect(mx, my, bounds.actions?.toggle)) {

@@ -300,6 +300,7 @@ def apply_anatomy_profile(lora_sd, profile_cfg, strict_zero=False):
     db_cfg = {str(k): v for k, v in profile_cfg.get("db", {}).items()}
     sb_cfg = {str(k): v for k, v in profile_cfg.get("sb", {}).items()}
     zero_cfg = profile_cfg.get("strict_zero", {}) if strict_zero else {}
+    zero_multiplier = float(profile_cfg.get("strict_zero_multiplier", 0.0)) if strict_zero else 0.0
     zero_db = {str(i) for i in zero_cfg.get("db", [])}
     zero_sb = {str(i) for i in zero_cfg.get("sb", [])}
     scaled = {}
@@ -314,7 +315,7 @@ def apply_anatomy_profile(lora_sd, profile_cfg, strict_zero=False):
             if part == "double_blocks" and i + 1 < len(parts):
                 idx = parts[i + 1]
                 if idx in zero_db:
-                    multiplier = 0.0
+                    multiplier = zero_multiplier
                 elif idx in db_cfg:
                     cfg = db_cfg[idx]
                     is_txt = any(x in parts for x in ("txt_attn", "txt_mlp"))
@@ -324,7 +325,7 @@ def apply_anatomy_profile(lora_sd, profile_cfg, strict_zero=False):
             if part == "single_blocks" and i + 1 < len(parts):
                 idx = parts[i + 1]
                 if idx in zero_sb:
-                    multiplier = 0.0
+                    multiplier = zero_multiplier
                 elif idx in sb_cfg:
                     multiplier = float(sb_cfg[idx])
                 break

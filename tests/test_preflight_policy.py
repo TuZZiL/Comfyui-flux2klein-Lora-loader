@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from preflight_policy import build_multi_advice, build_single_advice  # noqa: E402
+from preflight_policy import build_loader_hint, build_multi_advice, build_single_advice  # noqa: E402
 
 
 def make_analysis(db_img=1.0, db_txt=1.0, sb_values=None):
@@ -70,6 +70,18 @@ class PreflightPolicyTests(unittest.TestCase):
         self.assertEqual(advice["compat_status"], "partial")
         self.assertIn("partial", advice["report"])
         self.assertTrue(any("incomplete" in warning.lower() for warning in advice["warnings"]))
+
+    def test_loader_hint_returns_style_verdict_and_apply_payload(self):
+        sb = [0.92] * 24
+        hint = build_loader_hint(
+            make_analysis(db_img=1.35, db_txt=0.95, sb_values=sb),
+            use_case="Edit",
+            source_name="style.safetensors",
+        )
+        self.assertIn("Style-dominant", hint["verdict"])
+        self.assertEqual(hint["recommended_edit_mode"], "Style Only")
+        self.assertEqual(hint["apply"]["edit_mode"], "Style Only")
+        self.assertGreaterEqual(hint["apply"]["protection"], 0.35)
 
     def test_multi_overlap_scales_active_slots_and_preserves_inactive_slots(self):
         slot_a = {

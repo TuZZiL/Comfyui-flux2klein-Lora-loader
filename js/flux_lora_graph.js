@@ -23,6 +23,7 @@
 //   }
 
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 
 const N_DOUBLE  = 8;
 const N_SINGLE  = 24;
@@ -122,6 +123,12 @@ function parseGraphPresets(rawValue) {
     }
 }
 
+function updateWidgetValue(widget, value) {
+    if (!widget) return;
+    widget.value = value;
+    widget.callback?.(value);
+}
+
 app.registerExtension({
     name: "Comfy.FluxLoraGraph",
 
@@ -203,12 +210,15 @@ app.registerExtension({
             let graphPresets = parseGraphPresets(W("graph_presets")?.value);
             node._fluxCompatReport = null;
             node._fluxAutoDecision = null;
+            node._fluxLoaderHint = null;
 
             // Last non-zero trackers for toggle
             const lastDb = {};
             const lastSb = {};
             for (let i = 0; i < N_DOUBLE; i++) lastDb[i] = { img: 1.0, txt: 1.0 };
             for (let i = 0; i < N_SINGLE; i++) lastSb[i] = 1.0;
+            let _hintAnalyzeBounds = null;
+            let _hintApplyBounds = null;
 
             // ── Auto-strength live watcher ─────────────────────────────────────
             // Intercepts the layer_strengths widget value setter so that when
@@ -264,6 +274,8 @@ app.registerExtension({
                 }
             }, 10);
             // ─────────────────────────────────────────────────────────────────
+            resetHintOn(W("lora_name"));
+            resetHintOn(W("use_case"));
 
             // Drag state
             let drag = null;
@@ -313,6 +325,60 @@ app.registerExtension({
                 for (let i = 0; i < N_SINGLE; i++) {
                     if (strengths.sb[i] > 0.001) lastSb[i] = strengths.sb[i];
                 }
+            }
+
+            async function requestLoaderHint() {
+                const loraName = String(W("lora_name")?.value ?? "None");
+                const useCase = String(W("use_case")?.value ?? "Edit");
+                if (!loraName || loraName === "None") {
+                    node._fluxLoaderHint = { status: "error", verdict: "Select a LoRA first" };
+                    node.setDirtyCanvas(true, true);
+                    return;
+                }
+
+                node._fluxLoaderHint = { status: "loading", verdict: "" };
+                node.setDirtyCanvas(true, true);
+
+                try {
+                    const response = await api.fetchApi("/tuz_flux/loader_hint", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            lora_name: loraName,
+                            use_case: useCase,
+                        }),
+                    });
+                    const payload = await response.json();
+                    node._fluxLoaderHint = {
+                        status: response.ok ? "ready" : "error",
+                        verdict: String(payload?.verdict ?? "Analyze failed"),
+                        apply: payload?.apply ?? null,
+                    };
+                } catch (error) {
+                    node._fluxLoaderHint = { status: "error", verdict: "Analyze failed" };
+                    console.warn("[FluxLoraGraph] Failed to fetch loader hint:", error);
+                }
+                node.setDirtyCanvas(true, true);
+            }
+
+            function applyLoaderHint() {
+                const apply = node._fluxLoaderHint?.apply;
+                if (!apply) return;
+                updateWidgetValue(W("edit_mode"), String(apply.edit_mode ?? "Raw"));
+                if (typeof apply.protection === "number") {
+                    updateWidgetValue(W("protection"), Number(apply.protection));
+                }
+                node.setDirtyCanvas(true, true);
+            }
+
+            function resetHintOn(widget) {
+                if (!widget) return;
+                const originalCallback = widget.callback?.bind(widget);
+                widget.callback = (value, ...args) => {
+                    node._fluxLoaderHint = null;
+                    originalCallback?.(value, ...args);
+                    node.setDirtyCanvas(true, true);
+                };
             }
 
             function applyGraphPreset(kind) {
@@ -634,11 +700,14 @@ app.registerExtension({
                         ctx.fillText(helpText, helpX, legendY);
                     }
 
+                    const badgeY = lY + LABEL_H + 3;
                     const compat = node._fluxCompatReport;
                     let compatRight = gX + 2;
+                    let rightLimit = gX + gW - 2;
+                    _hintAnalyzeBounds = null;
+                    _hintApplyBounds = null;
                     if (compat) {
                         const badgeText = `Compat ${compat.matched_modules}/${compat.total_modules}`;
-                        const badgeY = lY + LABEL_H + 3;
                         const badgeW = Math.max(84, ctx.measureText(badgeText).width + 16);
                         const badgeX = gX + 2;
                         let fill = "#2a1a1a";
@@ -667,7 +736,6 @@ app.registerExtension({
 
                     const autoDecision = node._fluxAutoDecision;
                     if (autoDecision) {
-                        const autoY = lY + LABEL_H + 3;
                         const maxAutoW = gX + gW - 2 - compatRight;
                         if (maxAutoW >= 130) {
                             const autoPrefix = `Auto ${autoDecision.preset} ${autoDecision.protection.toFixed(2)}`;
@@ -677,16 +745,61 @@ app.registerExtension({
                             const autoW = Math.max(120, Math.min(maxAutoW, ctx.measureText(label).width + 16));
                             const autoX = gX + gW - autoW - 2;
                             if (autoX >= compatRight) {
-                                roundRect(ctx, autoX, autoY, autoW, BADGE_H - 4, 4);
+                                roundRect(ctx, autoX, badgeY, autoW, BADGE_H - 4, 4);
                                 ctx.fillStyle = "#122033";
                                 ctx.fill();
                                 ctx.strokeStyle = "#2d5f92";
                                 ctx.lineWidth = 1;
                                 ctx.stroke();
                                 ctx.fillStyle = "#9fceff";
-                                ctx.fillText(label, autoX + 8, autoY + 10);
+                                ctx.fillText(label, autoX + 8, badgeY + 10);
+                                rightLimit = autoX - 8;
                             }
                         }
+                    }
+
+                    const hint = node._fluxLoaderHint;
+                    const analyzeLabel = hint?.status === "loading" ? "Analyzing" : (hint?.status === "error" ? "Retry" : "Analyze");
+                    const analyzeW = Math.max(60, ctx.measureText(analyzeLabel).width + 16);
+                    if (rightLimit - compatRight >= analyzeW) {
+                        const analyzeRect = { x: compatRight, y: badgeY, w: analyzeW, h: BADGE_H - 4 };
+                        _hintAnalyzeBounds = analyzeRect;
+                        roundRect(ctx, analyzeRect.x, analyzeRect.y, analyzeRect.w, analyzeRect.h, 4);
+                        ctx.fillStyle = hint?.status === "loading" ? "#2a2412" : THEME.surfaceRaised;
+                        ctx.fill();
+                        ctx.strokeStyle = hint?.status === "loading" ? "#7a6230" : THEME.panelBorder;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                        ctx.fillStyle = hint?.status === "loading" ? "#ffd37a" : THEME.text;
+                        ctx.fillText(analyzeLabel, analyzeRect.x + 8, analyzeRect.y + 10);
+                        compatRight = analyzeRect.x + analyzeRect.w + 6;
+                    }
+
+                    if (hint?.status === "ready" && hint?.apply && rightLimit - compatRight >= 56) {
+                        const applyRect = { x: compatRight, y: badgeY, w: 50, h: BADGE_H - 4 };
+                        _hintApplyBounds = applyRect;
+                        roundRect(ctx, applyRect.x, applyRect.y, applyRect.w, applyRect.h, 4);
+                        ctx.fillStyle = "#14261a";
+                        ctx.fill();
+                        ctx.strokeStyle = "#2f6a42";
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                        ctx.fillStyle = "#9bf0b6";
+                        ctx.fillText("Apply", applyRect.x + 8, applyRect.y + 10);
+                        compatRight = applyRect.x + applyRect.w + 6;
+                    }
+
+                    if (hint?.verdict && rightLimit - compatRight >= 120) {
+                        const hintText = ellipsize(ctx, hint.verdict, rightLimit - compatRight - 16);
+                        const hintW = Math.max(120, Math.min(rightLimit - compatRight, ctx.measureText(hintText).width + 16));
+                        roundRect(ctx, compatRight, badgeY, hintW, BADGE_H - 4, 4);
+                        ctx.fillStyle = hint?.status === "error" ? "#2a1a1a" : "#1c232b";
+                        ctx.fill();
+                        ctx.strokeStyle = hint?.status === "error" ? "#5a2a2a" : "#3c556c";
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                        ctx.fillStyle = hint?.status === "error" ? "#ff9b9b" : "#bfd7f0";
+                        ctx.fillText(hintText, compatRight + 8, badgeY + 10);
                     }
                 },
 
@@ -703,6 +816,14 @@ app.registerExtension({
                                 node.setDirtyCanvas(true, true);
                                 return true;
                             }
+                        }
+                        if (_hintAnalyzeBounds && mx >= _hintAnalyzeBounds.x && mx <= _hintAnalyzeBounds.x + _hintAnalyzeBounds.w && my >= _hintAnalyzeBounds.y && my <= _hintAnalyzeBounds.y + _hintAnalyzeBounds.h) {
+                            requestLoaderHint();
+                            return true;
+                        }
+                        if (_hintApplyBounds && mx >= _hintApplyBounds.x && mx <= _hintApplyBounds.x + _hintApplyBounds.w && my >= _hintApplyBounds.y && my <= _hintApplyBounds.y + _hintApplyBounds.h) {
+                            applyLoaderHint();
+                            return true;
                         }
                     }
 

@@ -140,6 +140,43 @@ def recommend_edit_mode_protection(analysis, use_case="Edit"):
     return preset, round(float(protection), 2)
 
 
+def build_loader_hint(analysis, use_case="Edit", source_name=None):
+    summary = summarize_analysis(analysis)
+    tags = classify_profile(summary)
+    edit_mode, protection = recommend_edit_mode_protection(analysis, use_case=use_case)
+
+    verdict_prefix = "Balanced"
+    if "style-heavy" in tags:
+        verdict_prefix = "Style-dominant"
+    elif "late-heavy" in tags:
+        verdict_prefix = "Late-heavy edit"
+    elif "single-heavy" in tags:
+        verdict_prefix = "Single-block heavy"
+    elif "sparse" in tags:
+        verdict_prefix = "Sparse / gentle"
+    elif "broad" in tags and is_raw_preset_name(edit_mode):
+        verdict_prefix = "Broad balanced"
+
+    if is_raw_preset_name(edit_mode):
+        verdict = f"{verdict_prefix} LoRA - try {edit_mode}"
+    else:
+        verdict = f"{verdict_prefix} LoRA - try {edit_mode} + protection {protection:.2f}"
+
+    return {
+        "source_name": source_name,
+        "use_case": use_case,
+        "verdict": verdict,
+        "recommended_edit_mode": edit_mode,
+        "recommended_protection": protection,
+        "profile_tags": tags,
+        "analysis_summary": summary,
+        "apply": {
+            "edit_mode": edit_mode,
+            "protection": protection,
+        },
+    }
+
+
 def recommend_strength(summary, compat, edit_mode, use_case="Edit"):
     total = max(int(compat["total"]), 0)
     matched = int(compat["matched"])

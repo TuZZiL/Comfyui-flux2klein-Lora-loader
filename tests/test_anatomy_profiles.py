@@ -83,9 +83,11 @@ class AnatomyProfileTests(unittest.TestCase):
         self.assertEqual(raw["db"]["0"]["img"], 1.0)
         self.assertEqual(raw["db"]["0"]["txt"], 1.0)
         self.assertEqual(raw["sb"]["0"], 1.0)
+        self.assertEqual(raw["strict_zero_multiplier"], 1.0)
         self.assertEqual(protected["db"]["0"]["img"], 0.4)
         self.assertEqual(protected["db"]["0"]["txt"], 0.8)
         self.assertAlmostEqual(protected["sb"]["0"], 0.2)
+        self.assertEqual(protected["strict_zero_multiplier"], 0.0)
 
     def test_resolve_profile_accepts_custom_json(self):
         resolved = resolve_profile(
@@ -97,7 +99,7 @@ class AnatomyProfileTests(unittest.TestCase):
         self.assertEqual(resolved["strict_zero"]["db"], [1])
         self.assertEqual(resolved["strict_zero"]["sb"], [2])
 
-    def test_apply_anatomy_profile_scales_and_strict_zeros_targeted_layers(self):
+    def test_apply_anatomy_profile_scales_and_strict_zero_fades_with_strength(self):
         apply_anatomy_profile = _import_apply_anatomy_profile()
         lora_sd = {
             "diffusion_model.double_blocks.0.img_attn.qkv.lora_B.weight": 10.0,
@@ -111,11 +113,12 @@ class AnatomyProfileTests(unittest.TestCase):
             "db": {"0": {"img": 0.5, "txt": 0.8}},
             "sb": {"0": 0.3, "6": 0.6, "12": 0.9},
             "strict_zero": {"db": [0], "sb": [0]},
+            "strict_zero_multiplier": 0.25,
         }
         out = apply_anatomy_profile(lora_sd, cfg, strict_zero=True)
-        self.assertEqual(out["diffusion_model.double_blocks.0.img_attn.qkv.lora_B.weight"], 0.0)
-        self.assertEqual(out["diffusion_model.double_blocks.0.txt_attn.qkv.lora_B.weight"], 0.0)
-        self.assertEqual(out["diffusion_model.single_blocks.0.linear1.lora_B.weight"], 0.0)
+        self.assertEqual(out["diffusion_model.double_blocks.0.img_attn.qkv.lora_B.weight"], 2.5)
+        self.assertEqual(out["diffusion_model.double_blocks.0.txt_attn.qkv.lora_B.weight"], 2.5)
+        self.assertEqual(out["diffusion_model.single_blocks.0.linear1.lora_B.weight"], 2.5)
         self.assertEqual(out["diffusion_model.single_blocks.6.linear1.lora_B.weight"], 6.0)
         self.assertEqual(out["diffusion_model.single_blocks.12.linear1.lora_B.weight"], 9.0)
         self.assertEqual(out["diffusion_model.double_blocks.0.img_attn.qkv.lora_A.weight"], 5.0)

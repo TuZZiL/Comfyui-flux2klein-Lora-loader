@@ -2,8 +2,12 @@
 Edit-mode presets for FLUX.2 Klein 9B LoRA loading.
 
 Each preset defines per-layer strength multipliers that control how strongly
-the LoRA affects different parts of the model.  Based on community research
-(comfyUI-Realtime-Lora / flux_klein_debiaser) showing that:
+the LoRA affects different parts of the model. These presets are the
+identity/prompt-overwrite control layer: they mainly decide how much semantic
+rewriting the LoRA is allowed to do, especially in joint single blocks.
+
+Based on community research (comfyUI-Realtime-Lora / flux_klein_debiaser)
+showing that:
 
   - Double blocks (0-7): img and txt streams are ISOLATED.
     img_attn/img_mlp handle reference+noisy together.
@@ -61,6 +65,7 @@ EDIT_PRESETS = {
     RAW_PRESET_NAME: None,
 
     "Preserve Face": {
+        # Identity-focused shield for edit workflows.
         # Preserves face/identity during editing.
         # Double blocks: keep img stream, slightly reduce txt influence.
         # Single blocks: gradient from 1.0 (early) down to 0.30 (late).
@@ -82,7 +87,10 @@ EDIT_PRESETS = {
     },
 
     "Preserve Body": {
-        # Aggressive identity+body preservation during editing.
+        # Strong identity/body-preservation preset for edit workflows.
+        # This still belongs to the edit-mode family: it protects semantic
+        # subject overwrite first, while anatomy_profile can be layered on top
+        # when body structure also needs extra protection.
         # Protects face, body proportions (breast size, waist, figure).
         # Double blocks: keep img stream strong, reduce txt more.
         # Single blocks: dampened from sb4 onward (wider protection than Preserve Face).
@@ -104,7 +112,8 @@ EDIT_PRESETS = {
     },
 
     "Style Only": {
-        # Applies only stylistic changes, minimal structural impact.
+        # Style-focused edit mode. Keeps more prompt/style freedom while
+        # reducing image-stream structural disruption.
         # Double blocks: reduce img stream (less structural change), keep txt.
         # Single blocks: early kept, late strongly reduced.
         "db": {
@@ -125,6 +134,7 @@ EDIT_PRESETS = {
 
     "Edit Subject": {
         # Edit clothing/objects while preserving identity.
+        # Use this for semantic subject edits, not as a body/anatomy lock.
         # Compromise between Preserve Face and full LoRA.
         # Double blocks: slightly boost txt for prompt compliance.
         # Single blocks: moderate protection on late blocks.
@@ -146,6 +156,7 @@ EDIT_PRESETS = {
 
     "Boost Prompt": {
         # Strengthens prompt compliance (opposite of Preserve Face).
+        # This is the least protective semantic mode.
         # Double blocks: boost txt stream, slightly reduce img.
         # Single blocks: boost mid blocks where cross-modal mixing peaks.
         "db": {

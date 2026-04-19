@@ -1,5 +1,13 @@
 """
 Intent-based anatomy shielding profiles for FLUX LoRA editing.
+
+These profiles are a structure/body-preservation overlay, not a replacement
+for edit presets. In practice:
+  - edit_mode controls semantic / identity overwrite pressure
+  - anatomy_profile adds extra body / silhouette / structure protection
+
+The two systems can be combined. Their multipliers stack, so using both makes
+the final shielding stricter than either one alone.
 """
 
 from __future__ import annotations
@@ -95,6 +103,7 @@ def _neutral_profile():
         "db": {str(i): {"img": 1.0, "txt": 1.0} for i in range(N_DOUBLE)},
         "sb": {str(i): 1.0 for i in range(N_SINGLE)},
         "strict_zero": {"db": [], "sb": []},
+        "strict_zero_multiplier": 1.0,
     }
 
 
@@ -147,7 +156,15 @@ def expand_profile(profile):
 def interpolate_profile(expanded_profile, strength):
     strength = max(0.0, min(1.0, float(strength)))
     neutral = _neutral_profile()
-    result = {"db": {}, "sb": {}, "strict_zero": expanded_profile.get("strict_zero", {"db": [], "sb": []})}
+    result = {
+        "db": {},
+        "sb": {},
+        "strict_zero": expanded_profile.get("strict_zero", {"db": [], "sb": []}),
+        # Keep strict-zero targets on the same 0..1 interpolation curve as the
+        # rest of the anatomy shield instead of dropping to hard zero
+        # regardless of anatomy_strength.
+        "strict_zero_multiplier": 1.0 - strength,
+    }
 
     for idx, cfg in expanded_profile.get("db", {}).items():
         neutral_cfg = neutral["db"][str(idx)]

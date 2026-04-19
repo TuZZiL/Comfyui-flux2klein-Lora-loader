@@ -86,7 +86,20 @@ These are the terms you will see most often. If you only remember one thing, kee
 | `auto_tune` | Auto-only fine adjustment (-0.15 to +0.15) on top of Auto's protection choice. |
 | `auto_convert` | Converts many downloaded FLUX LoRAs into the format Klein expects. Leave it on unless you know the file is already native. |
 | `auto_strength` | Automatically spreads strength across layers. Useful later, not required for the first test. |
-| `anatomy_profile` | Extra body-preservation preset for clothing or body edits. Leave it off until you need it. |
+| `anatomy_profile` | Extra body-preservation overlay for clothing or body edits. It stacks on top of `edit_mode`. Leave it off until you need it. |
+
+## Two Protection Axes
+
+`edit_mode` and `anatomy_profile` are meant to solve different problems:
+
+- `edit_mode` = semantic / identity protection. It controls how much the LoRA can overwrite the subject, face, and prompt-driven meaning.
+- `anatomy_profile` = body / silhouette protection. It adds extra structure shielding when a clothing or body LoRA keeps changing proportions.
+
+They are designed to stack. When you enable both, the multipliers are combined, so the final shielding is stricter than either one alone.
+
+Practical rule:
+- Start with `edit_mode` alone.
+- Add `anatomy_profile` only if the body, silhouette, or proportions still drift.
 
 ## Node Overview
 
@@ -204,7 +217,7 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 - Keep `anatomy_profile=None` if you want the old behavior unchanged.
 - Start with `anatomy_strength=0.60–0.70`; raise it only if the body still drifts.
 
-**Practical rule:** `edit_mode` controls how much protection the LoRA gets per layer, while `anatomy_profile` adds a higher-level body-preservation preset on top. Use both only when you actually need them.
+**Practical rule:** `edit_mode` is the semantic / identity protection layer, while `anatomy_profile` is the body / structure protection overlay. Use both only when you actually need both kinds of protection.
 
 ### TUZ FLUX LoRA Multi
 

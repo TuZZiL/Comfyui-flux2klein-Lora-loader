@@ -12,17 +12,23 @@ import logging
 
 import comfy.utils
 import folder_paths
+from aiohttp import web
 
 try:  # pragma: no cover - import style depends on package context
     from .edit_presets import RAW_PRESET_NAME
     from .lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
     from .lora_meta import analyse_for_node
-    from .preflight_policy import build_multi_advice, build_single_advice, _active_slot
+    from .preflight_policy import build_loader_hint, build_multi_advice, build_single_advice, _active_slot
 except ImportError:  # pragma: no cover
     from edit_presets import RAW_PRESET_NAME
     from lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
     from lora_meta import analyse_for_node
-    from preflight_policy import build_multi_advice, build_single_advice, _active_slot
+    from preflight_policy import build_loader_hint, build_multi_advice, build_single_advice, _active_slot
+
+try:  # pragma: no cover - route registration depends on Comfy runtime
+    from server import PromptServer
+except Exception:  # pragma: no cover
+    PromptServer = None
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +76,47 @@ def _failure_report(reason, use_case="Edit"):
             "sample_incomplete": [],
         },
     }
+
+
+def _hint_failure(reason, use_case="Edit", source_name=None):
+    return {
+        "source_name": source_name,
+        "use_case": use_case,
+        "verdict": f"Analyze failed - {reason}",
+        "recommended_edit_mode": RAW_PRESET_NAME,
+        "recommended_protection": 0.5,
+        "profile_tags": [],
+        "analysis_summary": {},
+        "apply": {
+            "edit_mode": RAW_PRESET_NAME,
+            "protection": 0.5,
+        },
+        "error": str(reason),
+    }
+
+
+if PromptServer is not None:
+    @PromptServer.instance.routes.post("/tuz_flux/loader_hint")
+    async def tuz_flux_loader_hint(request):  # pragma: no cover - exercised in Comfy runtime
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        lora_name = str(payload.get("lora_name", "None"))
+        use_case = str(payload.get("use_case", "Edit"))
+
+        if not lora_name or lora_name == "None":
+            return web.json_response(_hint_failure("no LoRA selected", use_case=use_case, source_name=lora_name), status=400)
+
+        try:
+            lora_path, _ = _load_lora(lora_name)
+            analysis = analyse_for_node(lora_path)
+            hint = build_loader_hint(analysis, use_case=use_case, source_name=lora_name)
+            return web.json_response(hint)
+        except Exception as exc:
+            logger.exception("[FLUX Loader Hint] Failed to analyze LoRA")
+            return web.json_response(_hint_failure(exc, use_case=use_case, source_name=lora_name), status=500)
 
 
 class FluxLoraPreflight:
