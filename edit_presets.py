@@ -35,6 +35,8 @@ AUTO_BIAS_DELTAS = {
     "Neutral": 0.00,
     "Aggressive": -0.10,
 }
+RAW_PRESET_NAME = "Raw"
+LEGACY_RAW_PRESET_NAME = "None"
 AUTO_REASON_LABELS = {
     "fallback_empty": "no analysis data",
     "fallback_zero": "flat analysis data",
@@ -56,7 +58,7 @@ GRAPH_PRESET_MAP = {
 }
 
 EDIT_PRESETS = {
-    "None": None,
+    RAW_PRESET_NAME: None,
 
     "Preserve Face": {
         # Preserves face/identity during editing.
@@ -93,7 +95,7 @@ EDIT_PRESETS = {
         },
         "sb": {
             "0": 1.0,  "1": 1.0,  "2": 1.0,  "3": 0.95,
-            "4": 0.75, "5": 0.72, "6": 0.70, "7": 0.68,
+            "4": 0.85, "5": 0.80, "6": 0.76, "7": 0.72,
             "8": 0.65, "9": 0.62, "10": 0.60, "11": 0.55,
             "12": 0.50, "13": 0.47, "14": 0.44, "15": 0.40,
             "16": 0.38, "17": 0.35, "18": 0.33, "19": 0.32,
@@ -164,6 +166,16 @@ EDIT_PRESETS = {
 }
 
 PRESET_NAMES = list(EDIT_PRESETS.keys()) + ["Auto"]
+
+
+def normalize_edit_mode_name(edit_mode):
+    if edit_mode in (None, "", LEGACY_RAW_PRESET_NAME, RAW_PRESET_NAME):
+        return RAW_PRESET_NAME
+    return str(edit_mode)
+
+
+def is_raw_preset_name(name):
+    return normalize_edit_mode_name(name) == RAW_PRESET_NAME
 
 
 def _clamp01(value):
@@ -276,14 +288,14 @@ def auto_select_preset(analysis, use_case="Edit", auto_bias="Neutral", auto_tune
         - moderate late/mid single-block dominance     → Preserve Face
         - image-heavy double blocks with calm singles  → Style Only
         - full-coverage uniform LoRA                   → Preserve Face
-        - very soft / sparse structural LoRA           → None
+        - very soft / sparse structural LoRA           → Raw
         - otherwise                                    → Preserve Face
 
       Generate:
         - strong late single-block dominance           → Preserve Face
         - image-heavy double blocks with calm singles  → Style Only
-        - full-coverage / uniform LoRA                 → None
-        - otherwise                                    → None
+        - full-coverage / uniform LoRA                 → Raw
+        - otherwise                                    → Raw
 
     Protection is computed from max/mean ratio:
       - Higher concentration = higher protection
@@ -379,10 +391,10 @@ def auto_select_preset(analysis, use_case="Edit", auto_bias="Neutral", auto_tune
             preset = "Preserve Face"
             reason_code = "late_heavy_generate"
         elif coverage_ratio > 0.85 or (db_ratio > 0.82 and late_ratio < 1.05):
-            preset = "None"
+            preset = RAW_PRESET_NAME
             reason_code = "uniform_generate_none"
         else:
-            preset = "None"
+            preset = RAW_PRESET_NAME
             reason_code = "default_generate_none"
     else:
         if late_ratio > 1.30 or (late_ratio > 1.20 and max_ratio > 1.35):
@@ -398,19 +410,19 @@ def auto_select_preset(analysis, use_case="Edit", auto_bias="Neutral", auto_tune
             preset = "Preserve Face"
             reason_code = "uniform_edit_face"
         elif db_ratio > 0.85 and late_ratio < 0.95 and max_ratio < 1.12:
-            preset = "None"
+            preset = RAW_PRESET_NAME
             reason_code = "db_soft_none"
         else:
             preset = "Preserve Face"
             reason_code = "default_edit_face"
 
     # Pick protection from concentration: stronger profile concentration → higher protection.
-    # max_ratio 1.0–1.2 → protection ~0.45 (mild)
-    # max_ratio 1.5–2.0 → protection ~0.75 (strong protection)
+    # max_ratio 1.0–1.2 → protection ~0.55–0.60 (mild)
+    # max_ratio 1.5–2.0 → protection ~0.70–0.80 (strong protection)
     raw_mix = max(0.20, min(0.60, 0.70 - 0.25 * max_ratio))
-    if use_case == "Generate" and preset == "None":
+    if use_case == "Generate" and is_raw_preset_name(preset):
         raw_mix = max(raw_mix, 0.50)
-    elif preset == "None":
+    elif is_raw_preset_name(preset):
         raw_mix = max(raw_mix, 0.55)
     elif preset == "Style Only":
         raw_mix = max(raw_mix, 0.35)
@@ -441,7 +453,8 @@ def resolve_preset_selection(
 
     Manual modes ignore use_case; only Auto is use-case aware.
     """
-    if edit_mode == "Auto":
+    resolved_mode = normalize_edit_mode_name(edit_mode)
+    if resolved_mode == "Auto":
         return auto_select_preset(
             analysis or {},
             use_case=use_case,
@@ -450,14 +463,14 @@ def resolve_preset_selection(
             return_meta=return_meta,
         )
     if not return_meta:
-        return (edit_mode, balance)
+        return (resolved_mode, balance)
     manual_balance = 0.5
     try:
         manual_balance = float(balance)
     except (TypeError, ValueError):
         pass
     return (
-        edit_mode,
+        resolved_mode,
         manual_balance,
         {
             "use_case": use_case if use_case in USE_CASE_NAMES else "Edit",

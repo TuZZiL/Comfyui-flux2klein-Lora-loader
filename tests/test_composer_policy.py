@@ -86,7 +86,7 @@ class ComposerPolicyTests(unittest.TestCase):
         ]
         policies = compose_slot_policies(slots, goal="Edit", safety="Balanced", auto_normalize=True)
         self.assertEqual(policies[0]["layer_cfg"], {})
-        self.assertEqual(policies[0]["edit_mode"], "None")
+        self.assertEqual(policies[0]["edit_mode"], "Raw")
         self.assertEqual(policies[0]["anatomy_profile"], "None")
 
     def test_slot_level_anatomy_override_beats_role_default(self):

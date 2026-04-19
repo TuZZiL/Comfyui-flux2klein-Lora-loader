@@ -19,10 +19,12 @@ SAFETY_NAMES = ["Safe", "Balanced", "Strong"]
 COMPOSER_ROLE_NAMES = ["Main Edit", "Style", "Detail", "Identity", "Prompt Boost"]
 
 GROUP_NAMES = ("db_img", "db_txt", "sb_early", "sb_mid", "sb_late")
+STRENGTH_MIN = -3.0
+STRENGTH_MAX = 3.0
 
 ROLE_POLICIES = {
     "Main Edit": {
-        "edit_mode": "None",
+        "edit_mode": "Raw",
         "balance": 0.50,
         "priority": 1.35,
         "groups": {"db_img": 1.00, "db_txt": 1.00, "sb_early": 1.00, "sb_mid": 1.00, "sb_late": 1.00},
@@ -34,7 +36,7 @@ ROLE_POLICIES = {
         "groups": {"db_img": 0.92, "db_txt": 1.00, "sb_early": 0.98, "sb_mid": 1.00, "sb_late": 0.95},
     },
     "Detail": {
-        "edit_mode": "None",
+        "edit_mode": "Raw",
         "balance": 0.75,
         "priority": 0.80,
         "groups": {"db_img": 0.95, "db_txt": 0.95, "sb_early": 0.92, "sb_mid": 0.96, "sb_late": 1.00},
@@ -91,10 +93,16 @@ def normalize_slot(slot):
     role = slot.get("role", "Main Edit")
     if role not in COMPOSER_ROLE_NAMES:
         role = "Main Edit"
+    strength = 1.0
+    try:
+        strength = float(slot.get("strength", 1.0))
+    except (TypeError, ValueError):
+        pass
+    strength = _clamp(strength, STRENGTH_MIN, STRENGTH_MAX)
     return {
         "enabled": bool(slot.get("enabled", True)),
         "lora": slot.get("lora", "None"),
-        "strength": float(slot.get("strength", 1.0)),
+        "strength": strength,
         "role": role,
         "collapsed": bool(slot.get("collapsed", True)),
         "anatomy_profile": slot.get("anatomy_profile", "None"),

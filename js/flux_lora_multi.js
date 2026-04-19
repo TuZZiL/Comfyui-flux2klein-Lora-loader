@@ -6,7 +6,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const EDIT_MODES = ["None", "Preserve Face", "Preserve Body", "Style Only", "Edit Subject", "Boost Prompt", "Auto"];
+const EDIT_MODES = ["Raw", "Preserve Face", "Preserve Body", "Style Only", "Edit Subject", "Boost Prompt", "Auto"];
 const USE_CASES = ["Edit", "Generate"];
 
 const MIN_WIDTH = 520;
@@ -21,12 +21,12 @@ const ROW_GAP = 8;
 const CARD_GAP = 8;
 const RADIUS = 8;
 
-const STRENGTH_RANGE = { min: -5.0, max: 5.0, step: 0.05, precision: 2 };
+const STRENGTH_RANGE = { min: -3.0, max: 3.0, step: 0.05, precision: 2 };
 const BALANCE_RANGE = { min: 0.0, max: 1.0, step: 0.05, precision: 2 };
 const ANATOMY_STRENGTH_RANGE = { min: 0.0, max: 1.0, step: 0.05, precision: 2 };
 const DEFAULT_ANATOMY_PROFILES = [
     "None",
-    "Balanced Identity",
+    "Balanced Structure",
     "Undress Safe",
     "Undress Body Lock",
     "Cloth Swap Flexible",
@@ -61,7 +61,7 @@ const THEME = {
 };
 
 const BADGES = {
-    "None": { label: "NONE", fill: "#232323", stroke: "#3a3a3a", text: "#9d9d9d" },
+    "Raw": { label: "RAW", fill: "#232323", stroke: "#3a3a3a", text: "#9d9d9d" },
     "Preserve Face": { label: "FACE", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
     "Preserve Body": { label: "BODY", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
     "Style Only": { label: "STYLE", fill: "#252525", stroke: "#4b4b4b", text: "#d7d7d7" },
@@ -123,18 +123,32 @@ function snapToStep(value, step, min = -Infinity, max = Infinity, precision = 2)
     return Number(clamped.toFixed(precision));
 }
 
+function normalizeEditMode(value) {
+    if (value === "None" || value === "Raw" || value == null || value === "") return "Raw";
+    return value;
+}
+
 function normalizeSlot(initial) {
     const protectionRaw = typeof initial?.protection === "number"
         ? initial.protection
         : (typeof initial?.balance === "number" ? initial.balance : 0.5);
+    const anatomyProfile = initial?.anatomy_profile === "Balanced Identity"
+        ? "Balanced Structure"
+        : (initial?.anatomy_profile ?? "None");
     return {
         enabled: initial?.enabled ?? true,
         lora: initial?.lora ?? "None",
-        strength: typeof initial?.strength === "number" ? initial.strength : 1.0,
+        strength: snapToStep(
+            typeof initial?.strength === "number" ? initial.strength : 1.0,
+            STRENGTH_RANGE.step,
+            STRENGTH_RANGE.min,
+            STRENGTH_RANGE.max,
+            STRENGTH_RANGE.precision
+        ),
         use_case: initial?.use_case ?? "Edit",
-        edit_mode: initial?.edit_mode ?? "None",
+        edit_mode: normalizeEditMode(initial?.edit_mode),
         protection: protectionRaw,
-        anatomy_profile: initial?.anatomy_profile ?? "None",
+        anatomy_profile: anatomyProfile,
         anatomy_strength: typeof initial?.anatomy_strength === "number" ? initial.anatomy_strength : 0.65,
         anatomy_strict_zero: initial?.anatomy_strict_zero ?? false,
         anatomy_custom_json: initial?.anatomy_custom_json ?? "",
@@ -148,7 +162,7 @@ function makeDefaultSlot(overrides = {}) {
         lora: "None",
         strength: 1.0,
         use_case: "Edit",
-        edit_mode: "None",
+        edit_mode: "Raw",
         protection: 0.5,
         anatomy_profile: "None",
         anatomy_strength: 0.65,
@@ -207,7 +221,7 @@ function anatomySummary(slot, short = false) {
 }
 
 function badgeForMode(mode) {
-    return BADGES[mode] ?? BADGES["None"];
+    return BADGES[normalizeEditMode(mode)] ?? BADGES["Raw"];
 }
 
 function updateWidgetValue(widget, value) {

@@ -16,7 +16,7 @@ const FOOTER_H = 20;
 const ROW_GAP = 8;
 const RADIUS = 8;
 
-const STRENGTH_RANGE = { min: -5.0, max: 5.0, step: 0.05, precision: 2 };
+const STRENGTH_RANGE = { min: -3.0, max: 3.0, step: 0.05, precision: 2 };
 
 const THEME = {
     canvas: "#0a0f17",
@@ -96,12 +96,21 @@ function snapToStep(value, step, min = -Infinity, max = Infinity, precision = 2)
 }
 
 function normalizeSlot(initial) {
+    const anatomyProfile = initial?.anatomy_profile === "Balanced Identity"
+        ? "Balanced Structure"
+        : (initial?.anatomy_profile ?? "None");
     return {
         enabled: initial?.enabled ?? true,
         lora: initial?.lora ?? "None",
-        strength: typeof initial?.strength === "number" ? initial.strength : 1.0,
+        strength: snapToStep(
+            typeof initial?.strength === "number" ? initial.strength : 1.0,
+            STRENGTH_RANGE.step,
+            STRENGTH_RANGE.min,
+            STRENGTH_RANGE.max,
+            STRENGTH_RANGE.precision
+        ),
         role: ROLES.includes(initial?.role) ? initial.role : "Main Edit",
-        anatomy_profile: initial?.anatomy_profile ?? "None",
+        anatomy_profile: anatomyProfile,
         anatomy_strength: typeof initial?.anatomy_strength === "number" ? initial.anatomy_strength : 0.65,
         anatomy_strict_zero: initial?.anatomy_strict_zero ?? false,
         anatomy_custom_json: initial?.anatomy_custom_json ?? "",

@@ -77,7 +77,7 @@ class PreflightPolicyTests(unittest.TestCase):
             "lora": "a.safetensors",
             "strength": 1.2,
             "use_case": "Edit",
-            "edit_mode": "None",
+            "edit_mode": "Raw",
             "balance": 0.5,
         }
         slot_b = {
@@ -85,7 +85,7 @@ class PreflightPolicyTests(unittest.TestCase):
             "lora": "b.safetensors",
             "strength": 1.1,
             "use_case": "Edit",
-            "edit_mode": "None",
+            "edit_mode": "Raw",
             "balance": 0.5,
         }
         slot_c = {
@@ -93,7 +93,7 @@ class PreflightPolicyTests(unittest.TestCase):
             "lora": "c.safetensors",
             "strength": 0.8,
             "use_case": "Edit",
-            "edit_mode": "None",
+            "edit_mode": "Raw",
             "balance": 0.5,
         }
         entries = [

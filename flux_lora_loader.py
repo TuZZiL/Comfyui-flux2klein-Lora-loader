@@ -50,9 +50,11 @@ import logging
 
 from .edit_presets import (
     AUTO_BIAS_NAMES,
+    RAW_PRESET_NAME,
     PRESET_NAMES,
     USE_CASE_NAMES,
     build_graph_presets,
+    normalize_edit_mode_name,
 )
 from .anatomy_profiles import ANATOMY_PROFILE_NAMES
 from .lora_compat import build_key_map
@@ -80,6 +82,16 @@ from .node_json_contracts import (
 )
 
 logger = logging.getLogger(__name__)
+LORA_STRENGTH_MIN = -3.0
+LORA_STRENGTH_MAX = 3.0
+
+
+def _clamp_strength(value, default=0.0):
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = float(default)
+    return max(LORA_STRENGTH_MIN, min(LORA_STRENGTH_MAX, numeric))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # NODE 1 — FluxLoraLoader  (single LoRA, graph widget, auto-strength toggle)
@@ -100,8 +112,8 @@ class FluxLoraLoader:
                 "lora_name": (folder_paths.get_filename_list("loras"),),
                 "strength": ("FLOAT", {
                     "default": 1.0,
-                    "min": -5.0,
-                    "max": 5.0,
+                    "min": LORA_STRENGTH_MIN,
+                    "max": LORA_STRENGTH_MAX,
                     "step": 0.01,
                     "tooltip": "Overall LoRA strength. Lower it first if the edit is too aggressive; raise it if the LoRA feels too weak.",
                 }),
@@ -124,19 +136,8 @@ class FluxLoraLoader:
                     "tooltip": "Analyze LoRA layer strength automatically. Useful when some layers hit too hard and others feel too weak.",
                 }),
                 "edit_mode": (PRESET_NAMES, {
-                    "default": "None",
-                    "tooltip": "How protective the loader should be. Auto is the safest starting point. 'None' here means Raw / No Protection, not an unselected value.",
-                }),
-                "auto_bias": (AUTO_BIAS_NAMES, {
-                    "default": "Neutral",
-                    "tooltip": "Auto-only. Conservative adds protection, Aggressive relaxes it. Neutral keeps current Auto behavior.",
-                }),
-                "auto_tune": ("FLOAT", {
-                    "default": 0.0,
-                    "min": -0.15,
-                    "max": 0.15,
-                    "step": 0.05,
-                    "tooltip": "Auto-only fine tune added after Auto decision. Positive = safer, negative = freer.",
+                    "default": RAW_PRESET_NAME,
+                    "tooltip": "How protective the loader should be. Auto is the safest starting point. Raw means no extra protection.",
                 }),
                 "protection": ("FLOAT", {
                     "default": 0.5,
@@ -171,6 +172,18 @@ class FluxLoraLoader:
                 "graph_presets": ("STRING", {"default": json.dumps(build_graph_presets(), sort_keys=True)}),
                 # Written by the JS graph widget — never shown as a text box
                 "layer_strengths": ("STRING", {"default": "{}"}),
+                # Keep new widgets at the tail so legacy workflow widget order stays valid.
+                "auto_bias": (AUTO_BIAS_NAMES, {
+                    "default": "Neutral",
+                    "tooltip": "Auto-only. Conservative adds protection, Aggressive relaxes it. Neutral keeps current Auto behavior.",
+                }),
+                "auto_tune": ("FLOAT", {
+                    "default": 0.0,
+                    "min": -0.15,
+                    "max": 0.15,
+                    "step": 0.05,
+                    "tooltip": "Auto-only fine tune added after Auto decision. Positive = safer, negative = freer.",
+                }),
             },
             "hidden": {
                 "node_id": "UNIQUE_ID",
@@ -184,10 +197,13 @@ class FluxLoraLoader:
 
     def load_lora(self, model, lora_name, strength, use_case="Edit",
                   auto_convert=True, auto_strength=False, layer_strengths="{}",
-                  edit_mode="None", auto_bias="Neutral", auto_tune=0.0, protection=0.5,
+                  edit_mode=RAW_PRESET_NAME, protection=0.5,
                   anatomy_profile="None", anatomy_strength=0.65,
                   anatomy_strict_zero=False, anatomy_custom_json="",
-                  graph_presets=None, node_id=None, balance=None):
+                  graph_presets=None, node_id=None, balance=None,
+                  auto_bias="Neutral", auto_tune=0.0):
+        strength = _clamp_strength(strength)
+        edit_mode = normalize_edit_mode_name(edit_mode)
         if strength == 0:
             return (model,)
 
@@ -260,16 +276,16 @@ class FluxLoraMulti:
 
             enabled   = slot.get("enabled", True)
             lora_name = slot.get("lora", "None")
-            strength  = slot.get("strength", 1.0)
+            strength  = _clamp_strength(slot.get("strength", 1.0), default=1.0)
             use_case  = slot.get("use_case", "Edit")
-            edit_mode = slot.get("edit_mode", "None")
+            edit_mode = normalize_edit_mode_name(slot.get("edit_mode", RAW_PRESET_NAME))
             protection = slot.get("protection", slot.get("balance", 0.5))
             anatomy_profile = slot.get("anatomy_profile", "None")
             anatomy_strength = slot.get("anatomy_strength", 0.65)
             anatomy_strict_zero = slot.get("anatomy_strict_zero", False)
             anatomy_custom_json = slot.get("anatomy_custom_json", "")
 
-            if not enabled or lora_name == "None" or strength == 0:
+            if not enabled or lora_name == "None" or abs(strength) < 1e-8:
                 continue
 
             current = _load_and_patch(
@@ -351,7 +367,8 @@ class FluxLoraComposer:
         current = model
         for entry in policies:
             slot = entry["slot"]
-            if not slot["enabled"] or slot["lora"] == "None" or slot["strength"] == 0:
+            slot_strength = _clamp_strength(slot.get("strength", 1.0), default=1.0)
+            if not slot["enabled"] or slot["lora"] == "None" or abs(slot_strength) < 1e-8:
                 continue
 
             if entry["normalized"]:
@@ -387,7 +404,7 @@ class FluxLoraComposer:
             current = current.clone()
             current.add_patches(
                 prepared["patch_dict"],
-                strength_patch=slot["strength"],
+                strength_patch=slot_strength,
                 strength_model=1.0,
             )
 
@@ -421,8 +438,8 @@ class FluxLoraScheduled:
                 "lora_name": (folder_paths.get_filename_list("loras"),),
                 "strength": ("FLOAT", {
                     "default": 1.0,
-                    "min": 0.0,
-                    "max": 2.0,
+                    "min": LORA_STRENGTH_MIN,
+                    "max": LORA_STRENGTH_MAX,
                     "step": 0.01,
                     "tooltip": "Base LoRA strength before the schedule curve is applied. Lower it if the scheduled effect still feels too strong overall.",
                 }),
@@ -437,8 +454,8 @@ class FluxLoraScheduled:
             },
             "optional": {
                 "edit_mode": (PRESET_NAMES, {
-                    "default": "Auto",
-                    "tooltip": "How protective the loader should be across Klein layers. Auto analyzes the LoRA and picks a starting mode for you.",
+                    "default": RAW_PRESET_NAME,
+                    "tooltip": "How protective the loader should be across Klein layers. Raw means no extra protection.",
                 }),
                 "protection": ("FLOAT", {
                     "default": 0.5,
@@ -469,9 +486,11 @@ class FluxLoraScheduled:
     TITLE = "TUZ FLUX LoRA Scheduled"
 
     def load_lora(self, model, conditioning, lora_name, strength, use_case="Edit", schedule="Fade Out",
-                  edit_mode="Auto", protection=0.5, auto_convert=True, keyframes=5, balance=None):
+                  edit_mode=RAW_PRESET_NAME, protection=0.5, auto_convert=True, keyframes=5, balance=None):
         import comfy.hooks
 
+        strength = _clamp_strength(strength)
+        edit_mode = normalize_edit_mode_name(edit_mode)
         if strength == 0:
             return (model, conditioning)
 

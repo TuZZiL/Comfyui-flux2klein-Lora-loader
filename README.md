@@ -132,7 +132,7 @@ Think of `edit_mode` as a **protection dial**, not a category label:
 | **Style Only** | Structure (reduces image stream) | Aesthetic/painterly LoRAs |
 | **Edit Subject** | Moderate identity protection | Changing objects while keeping identity |
 | **Boost Prompt** | Nothing (strengthens text instead) | When prompt feels too weak |
-| **None** | Nothing | Raw LoRA behavior, full freedom |
+| **Raw** | Nothing | Raw LoRA behavior, full freedom (`None` still works as legacy alias) |
 
 ### The protection dial (`protection`, legacy `balance`)
 
@@ -176,7 +176,7 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 |---|---|---|
 | `model` | MODEL | FLUX.2 Klein / FLUX.1 model |
 | `lora_name` | dropdown | LoRA file from `models/loras` |
-| `strength` | float | Global LoRA strength (-5.0 to 5.0) |
+| `strength` | float | Global LoRA strength (-3.0 to 3.0) |
 | `use_case` | dropdown | Tells Auto whether you're editing a reference image or generating freely |
 | `auto_convert` | boolean | Convert diffusers-format LoRAs to native FLUX format |
 | `auto_strength` | boolean | Auto-compute per-layer strengths from ΔW analysis |
@@ -222,7 +222,7 @@ Each slot has: Enabled toggle, LoRA dropdown, Strength, Use case, Edit mode, Pro
 ```
 Slot 1: editing LoRA       → edit_mode=Auto, strength=0.6–0.8
 Slot 2: consistency LoRA   → edit_mode=Auto, strength=0.4–0.6
-Slot 3: enhancer LoRA      → edit_mode=None, strength=0.2–0.4
+Slot 3: enhancer LoRA      → edit_mode=Raw, strength=0.2–0.4
 ```
 
 If you are doing clothing removal or body-preserving edits, keep the anatomy profile on the main slot only. Suggested starts:
@@ -239,7 +239,7 @@ Per-step LoRA strength control using ComfyUI's native Hook Keyframes. The LoRA e
 | `model` | MODEL | FLUX.2 Klein model |
 | `conditioning` | CONDITIONING | Base conditioning |
 | `lora_name` | dropdown | LoRA file |
-| `strength` | float | Base LoRA strength (0.0–2.0) |
+| `strength` | float | Base LoRA strength (-3.0–3.0) |
 | `schedule` | dropdown | Strength curve profile |
 | `edit_mode` | dropdown | Protection level (supports Auto) |
 | `protection` | float | Raw LoRA ↔ preset protection (`balance` is still accepted as legacy input) |
@@ -269,7 +269,7 @@ Analyzes a LoRA file + model compatibility and returns recommendations **without
 | `matched_modules` | INT | LoRA modules that matched the model |
 | `total_modules` | INT | Total complete LoRA modules found |
 
-> **Note:** `recommended_edit_mode=None` means "Raw / No Protection", not "missing value".
+> **Note:** `recommended_edit_mode=Raw` means "Raw / No Protection", not "missing value" (`None` is still accepted as a legacy alias).
 
 The multi-slot advisor (`TUZ FLUX Multi Preflight Advisor`) accepts the same JSON slot format as `TUZ FLUX LoRA Multi`.
 
@@ -456,7 +456,7 @@ Use this when the LoRA changes clothes or accessories but must keep the person r
 ```
 Slot 1: editing LoRA     → edit_mode=Auto, strength=0.6–0.8
 Slot 2: consistency LoRA → edit_mode=Auto, strength=0.4–0.6
-Slot 3: enhancer LoRA    → edit_mode=None, strength=0.2–0.4
+Slot 3: enhancer LoRA    → edit_mode=Raw, strength=0.2–0.4
 ```
 
 If you need body stability, keep `anatomy_profile` on Slot 1 only. Treat `protection` as the main dial, and ignore legacy `balance` unless you open an older workflow.
@@ -466,7 +466,7 @@ If you need body stability, keep `anatomy_profile` on Slot 1 only. Treat `protec
 ## Troubleshooting
 
 - LoRA has no visible effect: make sure `auto_convert` is on, the model is loaded, and the LoRA file is in `models/loras`. If the file came from diffusers, leave the converter on.
-- Auto picked the wrong preset: switch from `Auto` to `Preserve Face` or `None`. Auto is a best guess, not a mind reader.
+- Auto picked the wrong preset: switch from `Auto` to `Preserve Face` or `Raw`. Auto is a best guess, not a mind reader.
 - Model/LoRA mismatch: this pack is made for FLUX.2 Klein and also works with FLUX.1. If you are using GGUF, install [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF).
 - `TUZ Klein Edit Composite` is missing: install `opencv-python-headless`.
 - The image changed, but too little: raise `strength` first before changing the preset.
@@ -523,7 +523,7 @@ Auto analyzes each LoRA's weight distribution across architecture layers:
 
 - **High signal in late single blocks** (editing LoRAs) → **Preserve Body**
 - **Moderate late-block signal** → **Preserve Face**
-- **Uniform distribution** (sliders, enhancers) → **None**
+- **Uniform distribution** (sliders, enhancers) → **Raw**
 
 Protection is also computed automatically. Console logs show the decision:
 ```
@@ -568,14 +568,14 @@ dim=4096  double_blocks=8  single_blocks=24
 **Q: Do I need this for FLUX.1?**
 A: It works with FLUX.1 too, but the main value is for Klein 9B where the architecture mismatch is most common.
 
-**Q: What does `None` mean in edit_mode?**
-A: "Raw / No Protection" — not "nothing selected". The LoRA runs with all layers at equal strength.
+**Q: What does `Raw` mean in edit_mode?**
+A: "Raw / No Protection". The LoRA runs with all layers at equal strength. Legacy `None` values are still accepted.
 
 **Q: My LoRA doesn't seem to have any effect.**
 A: Check `auto_convert` is ON. If using a GGUF model, ensure [ComfyUI-GGUF](https://github.com/city96/ComfyUI-GGUF) is installed.
 
 **Q: Auto mode picks the wrong preset for my use case.**
-A: Auto can't read your intent. Switch to manual: `Preserve Face` for identity work, `None` for full freedom. Use the `protection` dial to fine-tune (`balance` still works as a legacy alias).
+A: Auto can't read your intent. Switch to manual: `Preserve Face` for identity work, `Raw` for full freedom. Use the `protection` dial to fine-tune (`balance` still works as a legacy alias).
 
 **Q: How do I know which preset Auto picked?**
 A: Check the ComfyUI console. It logs e.g. `Auto → Preserve Body (protection=0.75)`.

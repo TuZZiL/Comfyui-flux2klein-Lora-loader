@@ -165,8 +165,9 @@ app.registerExtension({
             if (!node) return;
             const protection = Number(detail.protection ?? 0.0);
             const tune = Number(detail.auto_tune ?? 0.0);
+            const preset = String(detail.preset ?? "Raw");
             node._fluxAutoDecision = {
-                preset: String(detail.preset ?? "None"),
+                preset: preset === "None" ? "Raw" : preset,
                 protection: Number.isFinite(protection) ? protection : 0.0,
                 reason: String(detail.reason_label ?? detail.reason_code ?? "auto"),
                 auto_bias: String(detail.auto_bias ?? "Neutral"),

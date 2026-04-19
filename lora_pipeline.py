@@ -18,7 +18,14 @@ import torch
 
 try:  # pragma: no cover - package vs direct import
     from .anatomy_profiles import resolve_profile as resolve_anatomy_profile
-    from .edit_presets import EDIT_PRESETS, interpolate_preset, resolve_preset_selection
+    from .edit_presets import (
+        EDIT_PRESETS,
+        RAW_PRESET_NAME,
+        interpolate_preset,
+        is_raw_preset_name,
+        normalize_edit_mode_name,
+        resolve_preset_selection,
+    )
     from .flux_constants import (
         AUTO_STRENGTH_CEILING,
         AUTO_STRENGTH_FLOOR,
@@ -28,7 +35,14 @@ try:  # pragma: no cover - package vs direct import
     from .lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
 except ImportError:  # pragma: no cover
     from anatomy_profiles import resolve_profile as resolve_anatomy_profile
-    from edit_presets import EDIT_PRESETS, interpolate_preset, resolve_preset_selection
+    from edit_presets import (
+        EDIT_PRESETS,
+        RAW_PRESET_NAME,
+        interpolate_preset,
+        is_raw_preset_name,
+        normalize_edit_mode_name,
+        resolve_preset_selection,
+    )
     from flux_constants import AUTO_STRENGTH_CEILING, AUTO_STRENGTH_FLOOR, N_DOUBLE, N_SINGLE
     from lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
 
@@ -391,7 +405,7 @@ def send_auto_decision(node_id, decision):
             "flux_lora.auto_decision",
             {
                 "node": str(node_id),
-                "preset": str(decision.get("preset", "None")),
+                "preset": str(decision.get("preset", RAW_PRESET_NAME)),
                 "protection": float(decision.get("protection", 0.0)),
                 "base_protection": float(decision.get("base_protection", 0.0)),
                 "reason_code": str(decision.get("reason_code", "unknown")),
@@ -415,12 +429,14 @@ def resolve_edit_mode(
     auto_tune=0.0,
     return_decision=False,
 ):
+    edit_mode = normalize_edit_mode_name(edit_mode)
+
     def out(cfg, decision):
         if return_decision:
             return cfg, decision
         return cfg
 
-    if edit_mode == "None":
+    if is_raw_preset_name(edit_mode):
         return out(None, None)
     if edit_mode == "Auto":
         try:
@@ -453,7 +469,7 @@ def resolve_edit_mode(
             f"(protection={auto_balance:.2f}, bias={decision['auto_bias']}, "
             f"tune={decision['auto_tune']:+.2f}, reason={decision['reason_label']})"
         )
-        if auto_preset == "None":
+        if is_raw_preset_name(auto_preset):
             return out(None, decision)
         preset_raw = EDIT_PRESETS.get(auto_preset)
         if preset_raw is not None:

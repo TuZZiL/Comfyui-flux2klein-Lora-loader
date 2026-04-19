@@ -193,7 +193,7 @@ class LoraCompatTests(unittest.TestCase):
         )
         self.assertEqual(preset, "Preserve Body")
 
-    def test_auto_select_preset_keeps_none_for_sparse_soft_structural_profile(self):
+    def test_auto_select_preset_keeps_raw_for_sparse_soft_structural_profile(self):
         analysis = {
             "db": {
                 0: {"img": 1.0, "txt": 0.95},
@@ -205,12 +205,12 @@ class LoraCompatTests(unittest.TestCase):
             "layer_stats": [],
         }
         preset, balance = auto_select_preset(analysis, use_case="Edit")
-        self.assertEqual(preset, "None")
+        self.assertEqual(preset, "Raw")
         self.assertLessEqual(balance, 0.45)
 
-    def test_auto_select_preset_generate_prefers_none_for_uniform_full_coverage(self):
+    def test_auto_select_preset_generate_prefers_raw_for_uniform_full_coverage(self):
         preset, balance = auto_select_preset(self.make_analysis(), use_case="Generate")
-        self.assertEqual(preset, "None")
+        self.assertEqual(preset, "Raw")
         self.assertGreaterEqual(balance, 0.50)
 
     def test_auto_select_preset_generate_softens_late_heavy_to_preserve_face(self):
@@ -296,6 +296,10 @@ class LoraCompatTests(unittest.TestCase):
             auto_tune=0.15,
         )
         self.assertEqual(preset, ("Style Only", 0.35))
+
+    def test_manual_preset_resolution_accepts_legacy_none_alias(self):
+        preset = resolve_preset_selection("None", 0.35, use_case="Edit")
+        self.assertEqual(preset, ("Raw", 0.35))
 
 
 if __name__ == "__main__":

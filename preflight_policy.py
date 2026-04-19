@@ -10,10 +10,10 @@ from __future__ import annotations
 import json
 
 try:  # pragma: no cover - import style depends on package context
-    from .edit_presets import auto_select_preset
+    from .edit_presets import RAW_PRESET_NAME, auto_select_preset, is_raw_preset_name
     from .flux_constants import N_DOUBLE, N_SINGLE, TOTAL_COMPONENTS
 except ImportError:  # pragma: no cover
-    from edit_presets import auto_select_preset
+    from edit_presets import RAW_PRESET_NAME, auto_select_preset, is_raw_preset_name
     from flux_constants import N_DOUBLE, N_SINGLE, TOTAL_COMPONENTS
 
 
@@ -135,7 +135,7 @@ def classify_profile(summary):
 def recommend_edit_mode_protection(analysis, use_case="Edit"):
     use_case = use_case if use_case in ("Edit", "Generate") else "Edit"
     preset, protection = auto_select_preset(analysis or {}, use_case=use_case)
-    if preset == "None":
+    if is_raw_preset_name(preset):
         protection = 0.0
     return preset, round(float(protection), 2)
 
@@ -181,7 +181,7 @@ def recommend_strength(summary, compat, edit_mode, use_case="Edit"):
     elif edit_mode == "Boost Prompt":
         strength -= 0.03
 
-    if use_case == "Generate" and edit_mode in ("None", "Style Only"):
+    if use_case == "Generate" and (is_raw_preset_name(edit_mode) or edit_mode == "Style Only"):
         strength += 0.03
 
     return round(_clamp(strength, 0.35, 1.25), 2)
@@ -385,7 +385,7 @@ def build_multi_advice(entries, use_case="Edit", source_name=None):
             continue
         lines.append(
             f"  - Slot {entry['index'] + 1}: {label} -> "
-            f"{advice.get('recommended_edit_mode', 'None')} / "
+            f"{advice.get('recommended_edit_mode', RAW_PRESET_NAME)} / "
             f"protection {advice.get('recommended_balance', 1.0):.2f} / "
             f"strength {advice.get('recommended_strength', slot.get('strength', 1.0)):.2f}"
         )

@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
 
 ANATOMY_PROFILE_NAMES = [
     "None",
-    "Balanced Identity",
+    "Balanced Structure",
     "Undress Safe",
     "Undress Body Lock",
     "Cloth Swap Flexible",
@@ -26,10 +26,14 @@ ANATOMY_PROFILE_NAMES = [
     "Custom",
 ]
 
+ANATOMY_PROFILE_ALIASES = {
+    "Balanced Identity": "Balanced Structure",
+}
+
 
 ANATOMY_PROFILES = {
     "None": None,
-    "Balanced Identity": {
+    "Balanced Structure": {
         "db_img": 0.80,
         "db_txt": 0.85,
         "sb_bands": [0.70, 0.72, 0.78, 0.86, 0.92, 0.95],
@@ -134,6 +138,7 @@ def expand_profile(profile):
     }
 
     for i in range(N_SINGLE):
+        # 24 single blocks are split into six 4-block bands for compact tuning.
         band = min(i // 4, len(sb_bands) - 1)
         expanded["sb"][str(i)] = float(sb_bands[band])
     return expanded
@@ -168,6 +173,7 @@ def parse_custom_profile(raw_value):
 def resolve_profile(profile_name, strength=0.65, custom_json=""):
     if profile_name in (None, "", "None"):
         return None
+    profile_name = ANATOMY_PROFILE_ALIASES.get(profile_name, profile_name)
     if profile_name == "Custom":
         profile = parse_custom_profile(custom_json)
     else:

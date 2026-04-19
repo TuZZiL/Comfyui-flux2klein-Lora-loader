@@ -14,10 +14,12 @@ import comfy.utils
 import folder_paths
 
 try:  # pragma: no cover - import style depends on package context
+    from .edit_presets import RAW_PRESET_NAME
     from .lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
     from .lora_meta import analyse_for_node
     from .preflight_policy import build_multi_advice, build_single_advice, _active_slot
 except ImportError:  # pragma: no cover
+    from edit_presets import RAW_PRESET_NAME
     from lora_compat import build_compatibility_report, build_key_map, normalize_lora_keys
     from lora_meta import analyse_for_node
     from preflight_policy import build_multi_advice, build_single_advice, _active_slot
@@ -51,7 +53,7 @@ def _failure_report(reason, use_case="Edit"):
         "total_modules": 0,
         "skipped_modules": 0,
         "incomplete_modules": 0,
-        "recommended_edit_mode": "None",
+        "recommended_edit_mode": RAW_PRESET_NAME,
         "recommended_balance": 1.0,
         "recommended_strength": 0.5,
         "risk_level": "high",
@@ -179,7 +181,7 @@ class FluxLoraMultiPreflight:
             normalized.setdefault("lora", "None")
             normalized.setdefault("strength", 1.0)
             normalized.setdefault("use_case", use_case)
-            normalized.setdefault("edit_mode", "None")
+            normalized.setdefault("edit_mode", RAW_PRESET_NAME)
             normalized.setdefault("balance", 0.5)
             active = _active_slot(normalized)
             if not active:
