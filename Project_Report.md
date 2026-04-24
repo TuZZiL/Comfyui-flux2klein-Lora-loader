@@ -1,5 +1,12 @@
 # Project Report
 
+## 2026-04-24
+- context: Reviewed codebase math/heuristics for LoRA layer scaling, edit/anatomy interpolation, conditioning reference mixing, schedules, and edit compositing.
+- done: Identified main improvement candidate: mask reference `scale` and `mix` modes currently interpret mask polarity inconsistently.
+- done: Improved `ColorAnchor` ramp behavior so the first sampler callback is a no-op until sigma/step progress exists; added safer variance weighting and channel-count handling.
+- ideas: Consider adding robust norm normalization for AutoStrength/preflight and smoothing schedule/keyframe curves only if real samples show instability.
+- resolved: `python -m py_compile flux_conditioning_controls.py conditioning_common.py` and pure policy/anatomy/preflight tests passed; conditioning tests remain blocked by missing `torch`.
+
 ## 2026-04-19
 - context: Applied requested consistency pass for edit-mode naming, strength ranges, and anatomy profile semantics.
 - done: Fixed anatomy `strict_zero` discontinuity so targeted blocks now fade with `anatomy_strength` (`multiplier = 1 - strength`) instead of always dropping to hard zero.

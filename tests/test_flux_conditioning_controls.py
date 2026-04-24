@@ -273,7 +273,9 @@ class FluxConditioningControlsTests(unittest.TestCase):
         self.assertEqual(len(hooks), 1)
 
         denoised = torch.zeros(1, 128, 2, 2)
-        result = hooks[0]({"denoised": denoised, "sigma": torch.tensor(1.0)})
+        initial = hooks[0]({"denoised": denoised, "sigma": torch.tensor(1.0)})
+        result = hooks[0]({"denoised": denoised, "sigma": torch.tensor(0.5)})
+        self.assertTrue(torch.allclose(initial, denoised))
         self.assertGreater(float(result.mean().item()), 0.0)
 
     def test_color_anchor_can_average_multiple_references(self):
@@ -287,9 +289,35 @@ class FluxConditioningControlsTests(unittest.TestCase):
         model_out = node.apply(model, conditioning, strength=0.5, ramp_curve=1.0, ref_index=-1)[0]
         hooks = model_out.model_options.get("sampler_post_cfg_function", [])
         self.assertEqual(len(hooks), 1)
-        result = hooks[0]({"denoised": torch.zeros(1, 128, 2, 2), "sigma": torch.tensor(1.0)})
+        denoised = torch.zeros(1, 128, 2, 2)
+        hooks[0]({"denoised": denoised, "sigma": torch.tensor(1.0)})
+        result = hooks[0]({"denoised": denoised, "sigma": torch.tensor(0.5)})
         self.assertGreater(float(result.mean().item()), 0.0)
         self.assertLess(float(result.mean().item()), 1.0)
+
+    def test_color_anchor_handles_variance_weights_and_channel_mismatch(self):
+        node = Flux2KleinColorAnchor()
+        model = FakeModel()
+        conditioning = [(
+            torch.zeros(1, 8, 4),
+            {"reference_latents": [torch.ones(1, 128, 1, 1)]},
+        )]
+
+        model_out = node.apply(
+            model,
+            conditioning,
+            strength=1.0,
+            ramp_curve=1.0,
+            channel_weights="by_variance",
+        )[0]
+        hook = model_out.model_options["sampler_post_cfg_function"][0]
+        denoised = torch.zeros(1, 64, 2, 2)
+        hook({"denoised": denoised, "sigma": torch.tensor(1.0)})
+        result = hook({"denoised": denoised, "sigma": torch.tensor(0.5)})
+
+        self.assertEqual(tuple(result.shape), tuple(denoised.shape))
+        self.assertTrue(torch.isfinite(result).all())
+        self.assertGreater(float(result.mean().item()), 0.0)
 
     def test_structure_lock_moves_low_frequency_toward_reference(self):
         node = Flux2KleinStructureLock()

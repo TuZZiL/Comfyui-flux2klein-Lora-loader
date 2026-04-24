@@ -577,7 +577,7 @@ class Flux2KleinColorAnchor:
         ref_means = ref_latent.float().mean(dim=(-2, -1), keepdim=True)
         ch_trust = None
         if channel_weights == "by_variance":
-            spatial_var = ref_latent.float().var(dim=(-2, -1), keepdim=True)
+            spatial_var = ref_latent.float().var(dim=(-2, -1), keepdim=True, unbiased=False)
             ch_trust = 1.0 / (1.0 + spatial_var)
             ch_trust = ch_trust / ch_trust.max().clamp(min=1e-8)
 
@@ -586,26 +586,37 @@ class Flux2KleinColorAnchor:
             "last_sigma_logged": None,
             "step": 0,
         }
-        curve = max(ramp_curve, 1e-3)
+        curve = max(float(ramp_curve), 1e-3)
+        anchor_strength = float(max(0.0, min(1.0, strength)))
 
         def color_anchor_fn(args):
             denoised = args["denoised"]
             sigma = args["sigma"]
 
-            s, sigma_progress, step_progress, progress = compute_sigma_progress(state, sigma)
-            effective = strength * (progress ** (1.0 / curve))
+            s, sigma_progress, step_progress, _ = compute_sigma_progress(state, sigma)
+            # Avoid the generic step fallback applying a visible color pull on
+            # the first sampler callback before sigma has actually progressed.
+            delayed_step_progress = 0.0 if state["step"] <= 1 else step_progress
+            progress = max(sigma_progress, delayed_step_progress)
+            effective = anchor_strength * (progress ** (1.0 / curve))
 
             if effective < 1e-5:
                 return denoised
 
-            ref = ref_means.to(denoised.device, dtype=denoised.dtype)
-            cur = denoised.mean(dim=(-2, -1), keepdim=True)
+            ch_end = min(int(denoised.shape[1]), int(ref_means.shape[1]))
+            if ch_end <= 0:
+                return denoised
+
+            ref = ref_means[:, :ch_end, :, :].to(denoised.device, dtype=denoised.dtype)
+            current = denoised[:, :ch_end, :, :]
+            cur = current.mean(dim=(-2, -1), keepdim=True)
             correction = ref - cur
 
             if ch_trust is not None:
-                correction = correction * ch_trust.to(denoised.device, dtype=denoised.dtype)
+                correction = correction * ch_trust[:, :ch_end, :, :].to(denoised.device, dtype=denoised.dtype)
 
-            corrected = denoised + correction * effective
+            corrected = denoised.clone()
+            corrected[:, :ch_end, :, :] = current + correction * effective
 
             if debug and s != state["last_sigma_logged"]:
                 state["last_sigma_logged"] = s
