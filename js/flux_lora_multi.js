@@ -529,9 +529,15 @@ app.registerExtension({
             const W = (name) => node.widgets?.find((widget) => widget.name === name);
 
             node._slots = parseSlotData(W("slot_data")?.value);
-            const [loraList, anatomyProfiles] = await Promise.all([getLoraList(), getAnatomyProfiles()]);
-            node._loraList = loraList;
-            node._anatomyProfiles = anatomyProfiles;
+            node._loraList = _loraListCache || ["None"];
+            node._anatomyProfiles = _anatomyProfilesCache || [...DEFAULT_ANATOMY_PROFILES];
+            Promise.all([getLoraList(), getAnatomyProfiles()])
+                .then(([loraList, anatomyProfiles]) => {
+                    node._loraList = loraList;
+                    node._anatomyProfiles = anatomyProfiles;
+                    markDirty();
+                })
+                .catch((error) => console.warn("[FluxLoraMulti] Failed to initialize option lists:", error));
             node._multiState = {
                 viewMode: "compact",
                 bounds: {
@@ -561,10 +567,27 @@ app.registerExtension({
                 ensureProperties().slot_data_json = raw;
             }
 
+            function readSerializedWidgetValue(config, widgetName) {
+                const values = config?.widgets_values;
+                if (!values) return null;
+                if (!Array.isArray(values)) {
+                    const raw = values?.[widgetName];
+                    return typeof raw === "string" ? raw : null;
+                }
+                const widgetIndex = node.widgets?.findIndex((widget) => widget.name === widgetName) ?? -1;
+                if (widgetIndex < 0 || widgetIndex >= values.length) return null;
+                const raw = values[widgetIndex];
+                return typeof raw === "string" ? raw : null;
+            }
+
             function readSlotDataWithFallback(config) {
                 const widgetRaw = W("slot_data")?.value;
                 if (typeof widgetRaw === "string" && widgetRaw.trim() && widgetRaw.trim() !== "[]") {
                     return widgetRaw;
+                }
+                const serializedRaw = readSerializedWidgetValue(config, "slot_data");
+                if (typeof serializedRaw === "string" && serializedRaw.trim() && serializedRaw.trim() !== "[]") {
+                    return serializedRaw;
                 }
                 const configRaw = config?.properties?.slot_data_json;
                 if (typeof configRaw === "string" && configRaw.trim()) {
