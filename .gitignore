@@ -1,3 +1,7 @@
 .gemini/
 gha-creds-*.json
 Project_Report.md
+
+# Local ComfyUI workflow exports
+Flux2_Organized*.json
+workflow_*.json
