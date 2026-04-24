@@ -105,7 +105,7 @@ Practical rule:
 
 If you are new, you only need the loader for the first test. The rest are optional.
 
-This pack provides **7 nodes** organized into 3 groups:
+This pack provides **8 nodes** organized into 3 groups:
 
 ### LoRA Loading (core)
 
@@ -113,6 +113,7 @@ This pack provides **7 nodes** organized into 3 groups:
 |---|---|---|
 | **TUZ FLUX LoRA Loader** | Single LoRA + interactive graph widget | Your daily driver for 1 LoRA |
 | **TUZ FLUX LoRA Multi** | Multiple LoRAs, dynamic slots | Stacking 2-4 LoRAs (editing + consistency + style) |
+| **TUZ FLUX LoRA Compare** | Standard loader vs TUZ loader A/B outputs | Debug whether a LoRA needs Klein-aware conversion |
 | **TUZ FLUX LoRA Scheduled** | Per-step strength curves | When you need LoRA to fade in/out during sampling |
 
 ### Conditioning (companion tools)
@@ -213,6 +214,8 @@ Single LoRA loader with interactive per-layer graph widget and optional auto-str
 **Anatomy Shield:** Use this when a LoRA keeps changing the body shape while you only want the clothes or surface details to move.
 - `Undress Safe` is the default starting point for clothing removal.
 - `Undress Body Lock` is stricter and keeps the silhouette steadier.
+- `Body Shape Controlled` lets body-shape LoRAs act while damping early structural drift.
+- `Local Anatomy Detail` is lighter and keeps late/detail blocks open for localized anatomy or texture LoRAs.
 - `Robot Frame Lock` is the safest start for humanoid robots or mech edits.
 - Keep `anatomy_profile=None` if you want the old behavior unchanged.
 - Start with `anatomy_strength=0.60–0.70`; raise it only if the body still drifts.
@@ -242,6 +245,17 @@ If you are doing clothing removal or body-preserving edits, keep the anatomy pro
 - `Undress Safe` for normal clothing removal.
 - `Undress Body Lock` when the body shape must stay stable.
 - `Armor Hard Surface` for armor or rigid outfits.
+
+### TUZ FLUX LoRA Compare
+
+Diagnostic A/B loader for checking the same LoRA through ComfyUI's standard loading path and the TUZ Klein-aware path.
+
+Outputs:
+- `standard_model`: raw standard ComfyUI LoRA loading.
+- `tuz_model`: TUZ conversion / edit-mode / anatomy pipeline.
+- `report`: matched modules, skipped/incomplete modules, and patch counts for both branches.
+
+If `standard_model` has far fewer matches or patches than `tuz_model`, the LoRA likely needs Klein-aware key mapping or diffusers-to-native conversion.
 
 ### TUZ FLUX LoRA Scheduled
 

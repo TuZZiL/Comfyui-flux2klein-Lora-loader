@@ -30,6 +30,8 @@ const DEFAULT_ANATOMY_PROFILES = [
     "Undress Safe",
     "Undress Body Lock",
     "Cloth Swap Flexible",
+    "Body Shape Controlled",
+    "Local Anatomy Detail",
     "Robot Frame Lock",
     "Armor Hard Surface",
     "Anime Stylized Lock",

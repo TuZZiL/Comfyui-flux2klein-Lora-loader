@@ -26,6 +26,8 @@ ANATOMY_PROFILE_NAMES = [
     "Undress Safe",
     "Undress Body Lock",
     "Cloth Swap Flexible",
+    "Body Shape Controlled",
+    "Local Anatomy Detail",
     "Robot Frame Lock",
     "Armor Hard Surface",
     "Anime Stylized Lock",
@@ -63,6 +65,18 @@ ANATOMY_PROFILES = {
         "db_img": 0.72,
         "db_txt": 0.80,
         "sb_bands": [0.62, 0.68, 0.76, 0.84, 0.90, 0.93],
+        "strict_zero": {"db": [], "sb": []},
+    },
+    "Body Shape Controlled": {
+        "db_img": 0.74,
+        "db_txt": 0.82,
+        "sb_bands": [0.58, 0.66, 0.78, 0.90, 0.97, 1.00],
+        "strict_zero": {"db": [], "sb": []},
+    },
+    "Local Anatomy Detail": {
+        "db_img": 0.78,
+        "db_txt": 0.88,
+        "sb_bands": [0.72, 0.80, 0.90, 0.98, 1.00, 1.00],
         "strict_zero": {"db": [], "sb": []},
     },
     "Robot Frame Lock": {

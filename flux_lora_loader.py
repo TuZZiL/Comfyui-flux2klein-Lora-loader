@@ -1,9 +1,10 @@
 """
-FLUX LoRA Loader — Consolidated node pack (4 nodes).
+FLUX LoRA Loader — Consolidated node pack (5 nodes).
 
 Nodes:
   FluxLoraLoader    — Single LoRA with interactive graph widget + auto-strength toggle
   FluxLoraMulti     — Dynamic multi-slot loader (rgthree-style "+ Add LoRA")
+  FluxLoraCompare   — Diagnostic A/B comparison: standard loader vs TUZ loader
   FluxLoraScheduled — Per-step temporal scheduling, absorbs SetCondHooks
   FluxLoraComposer  — Compact role-based multi-LoRA composer
 
@@ -44,6 +45,7 @@ What it does:
 """
 
 import json
+import comfy.lora
 import comfy.utils
 import folder_paths
 import logging
@@ -68,6 +70,7 @@ from .composer_policy import (
 from .lora_pipeline import (
     apply_edit_multipliers as _apply_edit_multipliers,
     collect_compatibility_report as _collect_compatibility_report,
+    compatibility_status as _compatibility_status,
     compute_strengths as _compute_strengths,
     convert_to_native as _convert_to_native,
     is_diffusers_format as _is_diffusers_format,
@@ -92,6 +95,25 @@ def _clamp_strength(value, default=0.0):
     except (TypeError, ValueError):
         numeric = float(default)
     return max(LORA_STRENGTH_MIN, min(LORA_STRENGTH_MAX, numeric))
+
+
+def _standard_model_key_map(model):
+    builder = getattr(comfy.lora, "model_lora_keys_unet", None)
+    if builder is None:
+        raise RuntimeError("comfy.lora.model_lora_keys_unet is unavailable in this ComfyUI build")
+    try:
+        return builder(model.model, {})
+    except TypeError:
+        return builder(model.model)
+
+
+def _compat_line(label, report, patch_count):
+    total = int(report.get("total_modules", 0) or 0)
+    matched = int(report.get("matched_modules", 0) or 0)
+    incomplete = int(report.get("incomplete_modules", 0) or 0)
+    skipped = max(total - matched, 0)
+    status = _compatibility_status(matched, total, incomplete)
+    return f"{label}: {matched}/{total} matched, skipped={skipped}, incomplete={incomplete}, patches={patch_count}, status={status}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # NODE 1 — FluxLoraLoader  (single LoRA, graph widget, auto-strength toggle)
@@ -298,7 +320,159 @@ class FluxLoraMulti:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# NODE 3 — FluxLoraComposer  (compact role-based composition)
+# NODE 3 — FluxLoraCompareLoader  (standard vs TUZ diagnostic comparison)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class FluxLoraCompareLoader:
+    """
+    Diagnostic A/B loader.
+
+    Produces two model branches from the same base model:
+      - standard_model: ComfyUI native LoRA key mapping, raw LoRA file
+      - tuz_model: TUZ conversion / edit-mode / anatomy pipeline
+
+    Use it to compare whether a LoRA is being dropped by the standard loader or
+    changed by TUZ-specific conversion/protection logic.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "model": ("MODEL",),
+                "lora_name": (folder_paths.get_filename_list("loras"),),
+                "strength": ("FLOAT", {
+                    "default": 1.0,
+                    "min": LORA_STRENGTH_MIN,
+                    "max": LORA_STRENGTH_MAX,
+                    "step": 0.01,
+                    "tooltip": "Same strength applied to both comparison branches.",
+                }),
+            },
+            "optional": {
+                "auto_convert": ("BOOLEAN", {
+                    "default": True,
+                    "label_on": "TUZ auto-convert on",
+                    "label_off": "TUZ direct load",
+                    "tooltip": "Only affects the TUZ branch. The standard branch always uses raw ComfyUI loading.",
+                }),
+                "edit_mode": (PRESET_NAMES, {
+                    "default": RAW_PRESET_NAME,
+                    "tooltip": "Only affects the TUZ branch.",
+                }),
+                "protection": ("FLOAT", {
+                    "default": 0.5,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "tooltip": "Only affects the TUZ branch when edit_mode is not Raw.",
+                }),
+                "anatomy_profile": (ANATOMY_PROFILE_NAMES, {
+                    "default": "None",
+                    "tooltip": "Only affects the TUZ branch.",
+                }),
+                "anatomy_strength": ("FLOAT", {
+                    "default": 0.65,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "tooltip": "Only affects the TUZ branch.",
+                }),
+                "anatomy_strict_zero": ("BOOLEAN", {
+                    "default": False,
+                    "label_on": "TUZ strict zero blocks",
+                    "label_off": "TUZ soft anatomy shield",
+                    "tooltip": "Only affects the TUZ branch.",
+                }),
+                "anatomy_custom_json": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Only affects the TUZ branch when anatomy_profile=Custom.",
+                }),
+                "use_case": (USE_CASE_NAMES, {
+                    "default": "Edit",
+                    "tooltip": "Only affects the TUZ branch when edit_mode=Auto.",
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("MODEL", "MODEL", "STRING")
+    RETURN_NAMES = ("standard_model", "tuz_model", "report")
+    FUNCTION = "compare_lora"
+    CATEGORY = "loaders/FLUX"
+    TITLE = "TUZ FLUX LoRA Compare"
+
+    def compare_lora(
+        self,
+        model,
+        lora_name,
+        strength,
+        auto_convert=True,
+        edit_mode=RAW_PRESET_NAME,
+        protection=0.5,
+        anatomy_profile="None",
+        anatomy_strength=0.65,
+        anatomy_strict_zero=False,
+        anatomy_custom_json="",
+        use_case="Edit",
+    ):
+        strength = _clamp_strength(strength)
+        edit_mode = normalize_edit_mode_name(edit_mode)
+        if abs(strength) < 1e-8:
+            return (model, model, f"LoRA Compare: {lora_name}\nstrength=0; both branches unchanged")
+
+        lora_path = folder_paths.get_full_path("loras", lora_name)
+        lora_sd = comfy.utils.load_torch_file(lora_path, safe_load=True)
+        lines = [
+            f"LoRA Compare: {lora_name}",
+            f"strength={strength:.3f}",
+        ]
+
+        standard_model = model
+        try:
+            standard_key_map = _standard_model_key_map(model)
+            standard_report = _collect_compatibility_report(lora_sd, standard_key_map)
+            standard_patch_dict = comfy.lora.load_lora(lora_sd, standard_key_map, log_missing=False)
+            standard_model = model.clone()
+            standard_model.add_patches(standard_patch_dict, strength_patch=strength, strength_model=1.0)
+            lines.append(_compat_line("Standard", standard_report, len(standard_patch_dict)))
+        except Exception as exc:
+            lines.append(f"Standard: unavailable/failed ({exc})")
+
+        tuz_model = model
+        try:
+            prepared = _prepare_patch_data(
+                model,
+                lora_name,
+                strength,
+                auto_convert,
+                edit_mode,
+                protection,
+                anatomy_profile,
+                anatomy_strength,
+                anatomy_strict_zero,
+                anatomy_custom_json,
+                use_case,
+                node_label="FLUX LoRA Compare TUZ",
+            )
+            if prepared is None:
+                lines.append("TUZ: unchanged")
+            else:
+                tuz_model = model.clone()
+                tuz_model.add_patches(prepared["patch_dict"], strength_patch=strength, strength_model=1.0)
+                lines.append(_compat_line("TUZ", prepared["compat_report"], len(prepared["patch_dict"])))
+        except Exception as exc:
+            lines.append(f"TUZ: failed ({exc})")
+
+        lines.append(
+            "Interpretation: if Standard has far fewer matches/patches than TUZ, "
+            "the LoRA likely needs TUZ conversion or Klein-aware key mapping."
+        )
+        return (standard_model, tuz_model, "\n".join(lines))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NODE 4 — FluxLoraComposer  (compact role-based composition)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class FluxLoraComposer:
@@ -412,7 +586,7 @@ class FluxLoraComposer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# NODE 4 — FluxLoraScheduled  (temporal scheduling, absorbs SetCondHooks)
+# NODE 5 — FluxLoraScheduled  (temporal scheduling, absorbs SetCondHooks)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class FluxLoraScheduled:
@@ -548,6 +722,7 @@ class FluxLoraScheduled:
 NODE_CLASS_MAPPINGS = {
     "FluxLoraLoader":    FluxLoraLoader,
     "FluxLoraMulti":     FluxLoraMulti,
+    "FluxLoraCompareLoader": FluxLoraCompareLoader,
     "FluxLoraComposer":  FluxLoraComposer,
     "FluxLoraScheduled": FluxLoraScheduled,
 }
@@ -555,6 +730,7 @@ NODE_CLASS_MAPPINGS = {
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FluxLoraLoader":    "TUZ FLUX LoRA Loader",
     "FluxLoraMulti":     "TUZ FLUX LoRA Multi",
+    "FluxLoraCompareLoader": "TUZ FLUX LoRA Compare",
     "FluxLoraComposer":  "TUZ FLUX LoRA Composer",
     "FluxLoraScheduled": "TUZ FLUX LoRA Scheduled",
 }

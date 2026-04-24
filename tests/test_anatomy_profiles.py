@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-from anatomy_profiles import expand_profile, interpolate_profile, resolve_profile  # noqa: E402
+from anatomy_profiles import ANATOMY_PROFILE_NAMES, expand_profile, interpolate_profile, resolve_profile  # noqa: E402
 
 
 def _import_apply_anatomy_profile():
@@ -98,6 +98,19 @@ class AnatomyProfileTests(unittest.TestCase):
         self.assertEqual(resolved["db"]["0"]["img"], 0.6)
         self.assertEqual(resolved["strict_zero"]["db"], [1])
         self.assertEqual(resolved["strict_zero"]["sb"], [2])
+
+    def test_new_body_profiles_are_available_and_keep_late_detail_open(self):
+        self.assertIn("Body Shape Controlled", ANATOMY_PROFILE_NAMES)
+        self.assertIn("Local Anatomy Detail", ANATOMY_PROFILE_NAMES)
+
+        body_shape = resolve_profile("Body Shape Controlled", strength=1.0)
+        local_detail = resolve_profile("Local Anatomy Detail", strength=1.0)
+
+        self.assertLess(body_shape["sb"]["0"], body_shape["sb"]["20"])
+        self.assertEqual(body_shape["sb"]["23"], 1.0)
+        self.assertLess(local_detail["sb"]["0"], local_detail["sb"]["16"])
+        self.assertEqual(local_detail["sb"]["20"], 1.0)
+        self.assertEqual(local_detail["strict_zero"], {"db": [], "sb": []})
 
     def test_apply_anatomy_profile_scales_and_strict_zero_fades_with_strength(self):
         apply_anatomy_profile = _import_apply_anatomy_profile()

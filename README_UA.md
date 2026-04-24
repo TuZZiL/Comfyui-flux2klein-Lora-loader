@@ -105,7 +105,7 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 
 Якщо ви новачок, для першого тесту вам потрібен лише loader. Решта нод - опційні.
 
-Пакет містить **7 нод** у 3 групах:
+Пакет містить **8 нод** у 3 групах:
 
 ### Завантаження LoRA (ядро)
 
@@ -113,6 +113,7 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 |---|---|---|
 | **TUZ FLUX LoRA Loader** | Одна LoRA + інтерактивний граф | Ваш щоденний інструмент для 1 LoRA |
 | **TUZ FLUX LoRA Multi** | Кілька LoRA, динамічні слоти | Стекінг 2-4 LoRA (edit + consistency + style) |
+| **TUZ FLUX LoRA Compare** | A/B виходи стандартного loader і TUZ loader | Дебаг, чи LoRA потребує Klein-aware conversion |
 | **TUZ FLUX LoRA Scheduled** | Криві сили по кроках | Коли LoRA має затухати/наростати під час семплінгу |
 
 ### Conditioning (допоміжні інструменти)
@@ -213,6 +214,8 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 **Anatomy Shield:** Використовуйте, коли LoRA постійно змінює форму тіла, а вам треба рухати лише одяг або поверхневі деталі.
 - `Undress Safe` - стартовий профіль для зняття одягу.
 - `Undress Body Lock` - жорсткіший режим, сильніше тримає силует.
+- `Body Shape Controlled` дає body-shape LoRA діяти, але приглушує ранній structural drift.
+- `Local Anatomy Detail` легший профіль для локальної анатомії або текстур, late/detail блоки лишаються відкритими.
 - `Robot Frame Lock` - найкращий старт для humanoid robot або mech edits.
 - Залишайте `anatomy_profile=None`, якщо хочете стару поведінку без змін.
 - Починайте з `anatomy_strength=0.60–0.70`; піднімайте лише якщо тіло все ще пливе.
@@ -242,6 +245,17 @@ git clone https://github.com/TuZZiL/tuz-fluxklein-toolkit.git
 - `Undress Safe` для звичайного зняття одягу.
 - `Undress Body Lock`, якщо силует має лишатися стабільним.
 - `Armor Hard Surface` для броні або жорсткого одягу.
+
+### TUZ FLUX LoRA Compare
+
+Діагностична A/B нода для перевірки однієї LoRA через стандартний шлях ComfyUI і через TUZ Klein-aware pipeline.
+
+Виходи:
+- `standard_model`: raw standard ComfyUI LoRA loading.
+- `tuz_model`: TUZ conversion / edit-mode / anatomy pipeline.
+- `report`: matched modules, skipped/incomplete modules і patch counts для обох гілок.
+
+Якщо `standard_model` має значно менше matches або patches, ніж `tuz_model`, LoRA ймовірно потребує Klein-aware key mapping або diffusers-to-native conversion.
 
 ### TUZ FLUX LoRA Scheduled
 
